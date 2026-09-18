@@ -1,5 +1,11 @@
 """Automated mode: Earshot places the calls itself via Twilio.
 
+TwiML is delivered INLINE by default (Twilio's `twiml` parameter, 4000 char
+limit - the longest scenario here is 729). That means automated calling needs no
+public URL, no tunnel, and no server: credentials and a from-number are the whole
+setup. `earshot serve` and EARSHOT_PUBLIC_URL remain as a fallback for scenarios
+that outgrow the inline limit.
+
 Injection is OPEN LOOP - the harness plays its lines on a fixed timeline rather
 than reacting to the agent in real time. That is deliberate and it is sound,
 because nothing is measured at injection time. Twilio records the call in DUAL
@@ -25,6 +31,8 @@ from .util import die, dim, info, warn
 
 # How long we assume an agent turn lasts when a turn says "after_agent".
 DEFAULT_AGENT_BUDGET_S = 6.0
+# Twilio rejects an inline `twiml` payload over this size; fall back to a URL.
+TWIML_INLINE_LIMIT = 4000
 RATE = {"fast": "125%", "slow": "75%"}
 VOLUME = {"quiet": "soft", "loud": "loud"}
 
@@ -132,9 +140,6 @@ def place_calls(manifest: Dict[str, Any], plan: List[Dict[str, Any]],
         print(dim(f"... {len(plan)} calls total (showing 3)"))
         return []
 
-    if not base.startswith("https://"):
-        die("EARSHOT_PUBLIC_URL must be a public https URL Twilio can reach "
-            "(a Cloudflare tunnel or ngrok pointed at `earshot serve`).")
     if not from_number:
         die("Set TWILIO_FROM_NUMBER to a Twilio number you own.")
 
@@ -154,13 +159,23 @@ def place_calls(manifest: Dict[str, Any], plan: List[Dict[str, Any]],
             info(f"[{item['index']}/{len(plan)}] {dest.name} exists, skipping")
             continue
 
-        url = f"{base}/twiml/{scn}?budget={budget_s}"
+        markup = build_twiml(battery.get(scn), budget_s)
+        kwargs: Dict[str, Any] = {}
+        if len(markup) <= TWIML_INLINE_LIMIT:
+            kwargs["twiml"] = markup          # no public URL needed
+        elif base.startswith("https://"):
+            kwargs["url"] = f"{base}/twiml/{scn}?budget={budget_s}"
+        else:
+            die(f"{scn} renders {len(markup)} chars of TwiML, over Twilio's "
+                f"{TWIML_INLINE_LIMIT}-char inline limit. Run `earshot serve`, "
+                f"expose it, and set EARSHOT_PUBLIC_URL.")
+
         info(f"[{item['index']}/{len(plan)}] calling {sysid} ({to}) with {scn} "
              f"run {rn}")
         call = client.calls.create(
-            to=to, from_=from_number, url=url,
+            to=to, from_=from_number,
             record=True, recording_channels="dual",
-            timeout=30, time_limit=int(max_call_s),
+            timeout=30, time_limit=int(max_call_s), **kwargs,
         )
 
         deadline = time.time() + max_call_s + 60

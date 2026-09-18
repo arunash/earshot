@@ -220,6 +220,29 @@ def label_mono(x: np.ndarray, sr: int, segs: Sequence[Segment],
     return out, sep
 
 
+def detect_agent_channel(data: np.ndarray, sr: int, **kw) -> Tuple[int, float]:
+    """Work out which channel of a dual recording is the agent under test.
+
+    The agent answers the phone; the harness (or a human tester) waits for the
+    greeting before speaking. So the channel that speaks FIRST is the agent.
+
+    Getting this backwards silently inverts every metric in the report - response
+    latency becomes the harness's own scripted pauses, and barge-ins get
+    attributed to the wrong party - so it is detected rather than assumed.
+    Returns (channel, margin_seconds); a small margin means low confidence.
+    """
+    onsets = []
+    for ch in range(data.shape[1]):
+        segs = vad_segments(data[:, ch], sr, **kw)
+        onsets.append(segs[0].start if segs else float("inf"))
+    if all(o == float("inf") for o in onsets):
+        return 0, 0.0
+    ch = int(np.argmin(onsets))
+    others = [o for i, o in enumerate(onsets) if i != ch]
+    margin = (min(others) - onsets[ch]) if others else 0.0
+    return ch, float(margin if margin != float("inf") else 0.0)
+
+
 # ----------------------------------------------------------------- metrics --
 
 
@@ -270,6 +293,9 @@ class CallMetrics:
     mean_agent_turn_s: Optional[float] = None
     longest_agent_turn_s: Optional[float] = None
 
+    agent_channel: Optional[int] = None
+    agent_channel_margin_s: Optional[float] = None
+
     notes: List[str] = field(default_factory=list)
     segments: List[Segment] = field(default_factory=list)
 
@@ -285,15 +311,26 @@ class CallMetrics:
 
 
 def analyze(path: "str | Path", workdir: "str | Path",
-            agent_channel: int = 1, agent_first: bool = True, **kw) -> CallMetrics:
+            agent_channel: "int | str" = "auto", agent_first: bool = True,
+            **kw) -> CallMetrics:
     """Compute every objective metric for one call recording."""
     o = dict(DEFAULTS, **{k: v for k, v in kw.items() if k in DEFAULTS})
     sr, data, stereo = load_call(path, workdir)
     duration = data.shape[0] / sr
     notes: List[str] = []
+    margin = None
 
     if stereo:
-        ch_agent = int(agent_channel) % data.shape[1]
+        if agent_channel == "auto":
+            ch_agent, margin = detect_agent_channel(data, sr, **o)
+            if margin < 0.75:
+                notes.append(
+                    f"Agent channel detected as {ch_agent}, but only by {margin:.2f}s "
+                    f"- both parties start speaking at nearly the same time. If the "
+                    f"transcript has the speakers swapped, force it with "
+                    f"--agent-channel {1 - ch_agent}.")
+        else:
+            ch_agent = int(agent_channel) % data.shape[1]
         ch_caller = 1 - ch_agent
         agent_segs = [Segment(s.start, s.end, AGENT)
                       for s in vad_segments(data[:, ch_agent], sr, **o)]
@@ -408,6 +445,8 @@ def analyze(path: "str | Path", workdir: "str | Path",
         agent_talk_ratio=round(agent_time / speech, 3) if speech else None,
         mean_agent_turn_s=round(agent_time / len(agent_segs), 2) if agent_segs else None,
         longest_agent_turn_s=round(max((s.dur for s in agent_segs), default=0.0), 2),
+        agent_channel=ch_agent if stereo else None,
+        agent_channel_margin_s=None if margin is None else round(margin, 2),
         notes=notes,
         segments=ordered,
     )

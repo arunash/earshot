@@ -312,7 +312,7 @@ def cmd_ingest(a) -> int:
     m = read_json(rd / "manifest.json")
     b = battery_mod.load(m["battery"])
     systems = [s["id"] for s in m["systems"]]
-    agent_ch = m.get("agent_channel", 1)
+    agent_ch = m.get("agent_channel", "auto")
 
     found = discover(rd, systems)
     if not found:
@@ -346,8 +346,10 @@ def cmd_ingest(a) -> int:
             if not cm_dict.get("stereo"):
                 from .audio import Segment
                 segs = [Segment(**s) for s in cm_dict.get("segments", [])]
-            t = tr.transcribe_call(rec["path"], work, agent_channel=agent_ch,
-                                   engine=a.transcriber, segments=segs)
+            t = tr.transcribe_call(
+                rec["path"], work,
+                agent_channel=cm_dict.get("agent_channel", 0) or 0,
+                engine=a.transcriber, segments=segs)
             write_json(tpath, t)
 
         # --- QA: did the scenario actually produce what it was designed to? ---
@@ -635,8 +637,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--runs", type=int, help="runs per scenario")
     s.add_argument("--only", help="comma-separated scenario ids")
     s.add_argument("--skip", help="comma-separated scenario ids")
-    s.add_argument("--agent-channel", type=int, default=1,
-                   help="which channel of a dual recording is the agent (default 1)")
+    s.add_argument("--agent-channel", default="auto",
+                   help="which channel of a dual recording is the agent; "
+                        "'auto' (default) picks whichever speaks first")
     s.add_argument("--seed", type=int, default=None)
     s.add_argument("--no-shuffle", action="store_true",
                    help="keep scenario order fixed (not recommended)")
@@ -651,7 +654,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("analyze", help="measure one recording, no run needed")
     s.add_argument("recording")
-    s.add_argument("--agent-channel", type=int, default=1)
+    s.add_argument("--agent-channel", default="auto")
     s.add_argument("--caller-first", action="store_true",
                    help="mono only: the caller speaks first, not the agent")
     s.add_argument("--segments", action="store_true", help="print every segment")

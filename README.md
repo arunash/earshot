@@ -149,13 +149,15 @@ reads them.
 **Or let Earshot place the calls** (Twilio, optional):
 
 ```bash
-earshot doctor --twilio                # account live? which numbers can we call from?
-earshot serve &                        # TwiML server on :8787
-cloudflared tunnel --url http://localhost:8787   # or ngrok http 8787
-export EARSHOT_PUBLIC_URL=https://<the-tunnel-url>
-earshot call <run-id> --dry-run        # print the TwiML, call nobody
-earshot call <run-id>                  # dual-channel recordings, downloaded
+earshot doctor --twilio          # account live? which numbers can we call from?
+earshot call <run-id> --dry-run  # print the TwiML, call nobody
+earshot call <run-id>            # dual-channel recordings, downloaded
 ```
+
+No tunnel, no server, no public URL: TwiML is delivered inline on the call
+itself. (`earshot serve` + `EARSHOT_PUBLIC_URL` remain as a fallback for
+scenarios that outgrow Twilio's 4000-character inline limit — the longest
+scenario in the default battery renders 729.)
 
 Injection is open-loop — the harness plays its lines on a fixed timeline rather
 than reacting in real time. That is sound, because *nothing is measured at

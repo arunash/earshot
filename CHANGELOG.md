@@ -22,3 +22,10 @@ First release.
 
 - `earshot doctor --twilio` verifies the account is active, prints the balance,
   and lists callable numbers — before a run rather than after the first failure.
+- Automated calling delivers TwiML **inline** — no tunnel, no server, no public
+  URL. `earshot serve` remains a fallback past Twilio's 4000-char limit.
+- **Fixed: the agent channel default was inverted.** On Twilio outbound
+  dual-channel recordings the answering party is channel 0, not 1, so every
+  metric was computed against the harness's own leg. `--agent-channel` now
+  defaults to `auto` and picks whichever channel speaks first, warning when the
+  margin is under 0.75s.
