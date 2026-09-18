@@ -149,8 +149,11 @@ reads them.
 **Or let Earshot place the calls** (Twilio, optional):
 
 ```bash
-earshot serve &                        # TwiML server
-export EARSHOT_PUBLIC_URL=https://...  # tunnel pointed at it
+earshot doctor --twilio                # account live? which numbers can we call from?
+earshot serve &                        # TwiML server on :8787
+cloudflared tunnel --url http://localhost:8787   # or ngrok http 8787
+export EARSHOT_PUBLIC_URL=https://<the-tunnel-url>
+earshot call <run-id> --dry-run        # print the TwiML, call nobody
 earshot call <run-id>                  # dual-channel recordings, downloaded
 ```
 

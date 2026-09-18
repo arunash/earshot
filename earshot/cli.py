@@ -92,7 +92,54 @@ def cmd_doctor(a) -> int:
     if not (eng and sdk):
         print(dim("  Missing pieces degrade gracefully: metrics always work, and "
                   "`judge --dry-run` writes a prompt you can paste anywhere."))
+
+    if a.twilio:
+        print()
+        _check_twilio()
+    elif tw:
+        print(dim("  `earshot doctor --twilio` verifies the account is live and "
+                  "lists numbers you can call from."))
     return 0 if required_ok else 1
+
+
+def _check_twilio() -> None:
+    """Live check: is the account usable, and what can we call from?
+
+    Worth doing before a run rather than discovering a suspended account after
+    the first call fails.
+    """
+    print(bold("twilio"))
+    sid = os.environ.get("TWILIO_ACCOUNT_SID")
+    tok = os.environ.get("TWILIO_AUTH_TOKEN")
+    if not (sid and tok):
+        print(f"  {yellow('miss')}  credentials — set TWILIO_ACCOUNT_SID and "
+              f"TWILIO_AUTH_TOKEN")
+        return
+    try:
+        from twilio.rest import Client
+    except ImportError:
+        print(f"  {yellow('miss')}  twilio sdk — pip install 'earshot[twilio]'")
+        return
+    try:
+        client = Client(sid, tok)
+        acct = client.api.accounts(sid).fetch()
+        ok = acct.status == "active"
+        mark = green("ok  ") if ok else red("bad ")
+        print(f"  {mark}  account {acct.friendly_name!r} — status {acct.status}")
+        if not ok:
+            print(red("        the account is not active; outbound calls will fail"))
+        bal = client.api.accounts(sid).balance.fetch()
+        print(f"  {dim('    ')}  balance {bal.balance} {bal.currency}")
+        nums = client.incoming_phone_numbers.list(limit=20)
+        if nums:
+            print(f"  {green('ok  ')}  {len(nums)} number(s) you can call from:")
+            for n in nums:
+                print(f"        {n.phone_number}  {dim(n.friendly_name or '')}")
+            print(dim("        set TWILIO_FROM_NUMBER to one of these"))
+        else:
+            print(f"  {yellow('miss')}  no phone numbers on this account")
+    except Exception as e:
+        print(f"  {red('bad ')}  {type(e).__name__}: {str(e)[:160]}")
 
 
 def cmd_selftest(a) -> int:
@@ -566,6 +613,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("doctor", help="check that the toolchain is ready")
+    s.add_argument("--twilio", action="store_true",
+                   help="also verify the Twilio account is live and list numbers")
     s.set_defaults(func=cmd_doctor)
 
     s = sub.add_parser("selftest", help="verify the analyzer against known ground truth")

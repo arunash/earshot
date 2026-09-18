@@ -17,3 +17,8 @@ First release.
 - Manual mode (you call, with a generated call sheet) and automated mode
   (Twilio, dual-channel recordings).
 - Markdown and standalone HTML report cards.
+
+## Unreleased
+
+- `earshot doctor --twilio` verifies the account is active, prints the balance,
+  and lists callable numbers — before a run rather than after the first failure.
