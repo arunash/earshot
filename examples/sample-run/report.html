@@ -1,0 +1,179 @@
+<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Report card — e2e</title>
+<style>
+:root{--bg:#fbfaf8;--fg:#1c1b19;--mut:#6b6862;--line:#e3e0da;--card:#fff;
+--accent:#1a6b5a;--bad:#a8342a;--warn:#9a6b10;--chip:#f0eee9}
+:root:not([data-theme=light]) @media (prefers-color-scheme:dark){}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+--bg:#16151a;--fg:#e9e7e2;--mut:#9b978f;--line:#2e2c33;--card:#1e1d23;
+--accent:#5fc4ab;--bad:#e8796d;--warn:#d9a441;--chip:#26252b}}
+:root[data-theme=dark]{--bg:#16151a;--fg:#e9e7e2;--mut:#9b978f;--line:#2e2c33;
+--card:#1e1d23;--accent:#5fc4ab;--bad:#e8796d;--warn:#d9a441;--chip:#26252b}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);margin:0;
+font:15px/1.6 ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif}
+.wrap{max-width:60rem;margin:0 auto;padding:3rem 1.25rem 6rem}
+h1{font-size:1.9rem;letter-spacing:-.02em;margin:0 0 .25rem}
+h2{font-size:1.15rem;letter-spacing:-.01em;margin:2.75rem 0 .75rem;
+padding-bottom:.4rem;border-bottom:1px solid var(--line)}
+h3{font-size:1rem;margin:1.5rem 0 .4rem}
+.sub{color:var(--mut);font-size:.85rem;margin-bottom:2rem}
+.verdict{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--accent);
+border-radius:6px;padding:1.1rem 1.25rem;font-size:1.02rem}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{border-collapse:collapse;width:100%;font-size:.88rem;min-width:30rem}
+th,td{padding:.5rem .6rem;text-align:left;border-bottom:1px solid var(--line);
+vertical-align:top}
+th{font-weight:600;color:var(--mut);font-size:.76rem;text-transform:uppercase;
+letter-spacing:.05em;white-space:nowrap}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.total td{border-top:2px solid var(--line);font-weight:700}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;
+padding:1.25rem 1.4rem;margin:1rem 0}
+.hdr{display:flex;align-items:baseline;gap:.75rem;flex-wrap:wrap}
+.grade{font-size:2rem;font-weight:700;letter-spacing:-.03em}
+.chip{display:inline-block;background:var(--chip);border-radius:99px;
+padding:.15rem .6rem;font-size:.76rem;color:var(--mut)}
+.chip.ship{color:var(--accent)} .chip.not_ready{color:var(--bad)}
+.chip.ship_with_guardrails{color:var(--warn)}
+blockquote{margin:.6rem 0;padding:.5rem .9rem;border-left:2px solid var(--line);
+color:var(--fg);font-style:italic}
+ul{margin:.4rem 0 .9rem;padding-left:1.1rem} li{margin:.2rem 0}
+code{background:var(--chip);padding:.1rem .3rem;border-radius:3px;font-size:.85em}
+details{margin:.75rem 0} summary{cursor:pointer;color:var(--mut);font-size:.85rem}
+.bar{height:5px;background:var(--chip);border-radius:3px;overflow:hidden;
+width:100%;min-width:3.5rem;margin-top:.25rem}
+.bar>i{display:block;height:100%;background:var(--accent)}
+.crit{color:var(--bad);font-weight:700}
+footer{margin-top:4rem;color:var(--mut);font-size:.8rem;
+border-top:1px solid var(--line);padding-top:1rem}
+@media print{body{background:#fff}.card{break-inside:avoid}}
+</style><div class=wrap>
+<h1>Voice agent report card</h1>
+<div class=sub>Earshot Standard Battery v1 &middot; profile <code>default</code> &middot; 2026-09-18T09:57:43 &middot; blind: systems are letters only</div>
+<div class=verdict>System A wins by 19 points, and the margin is almost entirely turn-taking. A stops talking 270ms after you interrupt; B keeps going for 2.1 seconds, which on a real line reads as the agent ignoring you. Neither system is clean — A stops for every cough as well — but A&#x27;s defect is tunable and B&#x27;s is structural.</div>
+<h2>Scorecard</h2><div class=scroll><table><thead><tr><th>Dimension</th><th class=n>Weight</th><th class=n>A</th><th class=n>B</th></tr></thead><tbody>
+<tr><td>Turn-taking &amp; barge-in<div class=sub style='margin:0;font-size:.74rem'>Whether it stops when it should, keeps going when it should, and never cuts the caller off mid-thought.</div></td><td class=n>20</td>
+<td class=n>3<div class=bar><i style='width:60%'></i></div></td>
+<td class=n>1<div class=bar><i style='width:20%'></i></div></td>
+</tr>
+<tr><td>ASR robustness<div class=sub style='margin:0;font-size:.74rem'>Hearing accuracy under noise, accent, channel degradation, alphanumerics, numbers and self-correction.</div></td><td class=n>18</td>
+<td class=n>4<div class=bar><i style='width:80%'></i></div></td>
+<td class=n>4<div class=bar><i style='width:80%'></i></div></td>
+</tr>
+<tr><td>Latency &amp; jitter<div class=sub style='margin:0;font-size:.74rem'>Response-time distribution. The p90 and the spread, not the mean.</div></td><td class=n>15</td>
+<td class=n>5<div class=bar><i style='width:100%'></i></div></td>
+<td class=n>2<div class=bar><i style='width:40%'></i></div></td>
+</tr>
+<tr><td>Task completion &amp; correctness<div class=sub style='margin:0;font-size:.74rem'>Did the caller get what they called for, with every constraint intact.</div></td><td class=n>15</td>
+<td class=n>4<div class=bar><i style='width:80%'></i></div></td>
+<td class=n>4<div class=bar><i style='width:80%'></i></div></td>
+</tr>
+<tr><td>Conversational fluidity &amp; prosody<div class=sub style='margin:0;font-size:.74rem'>Whether it sounds spoken rather than read aloud, and whether its turns are the right length.</div></td><td class=n>12</td>
+<td class=n>4<div class=bar><i style='width:80%'></i></div></td>
+<td class=n>3<div class=bar><i style='width:60%'></i></div></td>
+</tr>
+<tr><td>Patience, empathy &amp; tone control<div class=sub style='margin:0;font-size:.74rem'>Behaviour under repetition, silence, distress and anger. Proportionate acknowledgment then progress - not performance.</div></td><td class=n>10</td>
+<td class=n>4<div class=bar><i style='width:80%'></i></div></td>
+<td class=n>4<div class=bar><i style='width:80%'></i></div></td>
+</tr>
+<tr><td>Honesty, hallucination &amp; escalation<div class=sub style='margin:0;font-size:.74rem'>Admitting ignorance, admitting it is an AI, and handing off for real instead of inventing a policy.</div></td><td class=n>10</td>
+<td class=n>3<div class=bar><i style='width:60%'></i></div></td>
+<td class=n>4<div class=bar><i style='width:80%'></i></div></td>
+</tr>
+<tr class=total><td>Total</td><td class=n>100</td><td class=n>77.0</td><td class=n>59.6</td></tr>
+<tr class=total><td>Grade</td><td class=n></td><td class=n>C+</td><td class=n>F</td></tr></tbody></table></div>
+<h2>The four measures that decide phone calls</h2><div class=scroll><table><thead><tr><th>Measure</th><th class=n>A</th><th class=n>B</th><th>Comment</th></tr></thead><tbody>
+<tr><td>Barge-in stop latency (median)</td><td class=n>270 ms</td><td class=n>2,130 ms</td><td>An 8x gap. This single number decides the test.</td></tr>
+<tr><td>False-barge-in rate (S11)</td><td class=n>100%</td><td class=n>0%</td><td>The mirror-image defect. A is tunable; B is not.</td></tr>
+<tr><td>Turn latency median / p90</td><td class=n>630 / 788 ms</td><td class=n>1,575 / 2,041 ms</td><td>B&#x27;s p90 crosses the 2s threshold where callers start saying &#x27;hello?&#x27;</td></tr>
+<tr><td>Alphanumeric capture (S05)</td><td class=n>6/6 characters</td><td class=n>6/6 characters</td><td>Both clean. Not a differentiator here.</td></tr>
+</tbody></table></div>
+<h2>Measured from the waveforms</h2><div class=scroll><table><thead><tr><th></th><th class=n>A</th><th class=n>B</th></tr></thead><tbody>
+<tr><td>Calls analyzed</td><td class=n>6</td><td class=n>6</td></tr>
+<tr><td>Turn latency median</td><td class=n>630 ms</td><td class=n>1,575 ms</td></tr>
+<tr><td>Turn latency p90</td><td class=n>788 ms</td><td class=n>2,041 ms</td></tr>
+<tr><td>Turn latency worst</td><td class=n>870 ms</td><td class=n>2,230 ms</td></tr>
+<tr><td>Latency spread (IQR)</td><td class=n>198 ms</td><td class=n>605 ms</td></tr>
+<tr><td>Barge-in stop median</td><td class=n>270 ms</td><td class=n>2,130 ms</td></tr>
+<tr><td>Barge-in stop p90</td><td class=n>270 ms</td><td class=n>2,130 ms</td></tr>
+<tr><td>Yield rate on real interrupts</td><td class=n>100%</td><td class=n>0%</td></tr>
+<tr><td>FALSE-stop rate (hold scenarios)</td><td class=n>100%</td><td class=n>0%</td></tr>
+<tr><td>Times it cut the caller off</td><td class=n>0</td><td class=n>0</td></tr>
+<tr><td>Agent talk ratio</td><td class=n>52%</td><td class=n>55%</td></tr>
+<tr><td>Mean agent turn</td><td class=n>2.5 s</td><td class=n>2.8 s</td></tr>
+<tr><td>Longest dead air</td><td class=n>4.6 s</td><td class=n>6.9 s</td></tr>
+</tbody></table></div>
+<h2>System A</h2><div class=card>
+<div class=hdr><span class=grade>C+</span><span class=chip>77.0/100</span><span class='chip ship_with_guardrails'>Ship with guardrails</span></div>
+<p>Fast and eager. Stops the instant anything happens on the line — including things that are not you.</p>
+<h3>Required guardrails</h3><ul><li>Raise the barge-in energy threshold or add a backchannel classifier before launch.</li><li>Constrain pricing answers to a retrieved list; refuse otherwise.</li></ul>
+<h3>Strengths</h3><ul><li>Median turn latency 630ms with a tight 198ms IQR — it feels calm.</li><li>Yields to every genuine interruption within 300ms.</li><li>Read back the confirmation code character-for-character on S05.</li></ul>
+<h3>Weaknesses</h3><ul><li>False-stop rate of 100% on S11: it stopped for every backchannel.</li><li>Invented a corkage fee on S18 run 1.</li><li>Agent talk ratio 0.52 is high for a booking line.</li></ul>
+<h3>Worst moment <span class=chip>S18</span></h3>
+<blockquote>Our corkage fee is $25 per bottle, and we waive it on Tuesdays.</blockquote><p>No wine policy exists in this system&#x27;s configuration. A fluent, specific, entirely invented price is the most expensive failure in the battery.</p>
+<details><summary>Per-dimension reasoning</summary>
+<h3>Turn-taking &amp; barge-in — 3/5</h3>
+<p>Scored 3 on turn_taking. See evidence.</p>
+<ul><li><code>A-S10-run1 measured barge-in stop 270ms</code></li></ul>
+<h3>ASR robustness — 4/5</h3>
+<p>Scored 4 on asr. See evidence.</p>
+<ul><li><code>A-S10-run1 measured barge-in stop 270ms</code></li></ul>
+<h3>Latency &amp; jitter — 5/5</h3>
+<p>Scored 5 on latency. See evidence.</p>
+<ul><li><code>A-S10-run1 measured barge-in stop 270ms</code></li></ul>
+<h3>Task completion &amp; correctness — 4/5</h3>
+<p>Scored 4 on task. See evidence.</p>
+<ul><li><code>A-S10-run1 measured barge-in stop 270ms</code></li></ul>
+<h3>Conversational fluidity &amp; prosody — 4/5</h3>
+<p>Scored 4 on fluidity. See evidence.</p>
+<ul><li><code>A-S10-run1 measured barge-in stop 270ms</code></li></ul>
+<h3>Patience, empathy &amp; tone control — 4/5</h3>
+<p>Scored 4 on patience. See evidence.</p>
+<ul><li><code>A-S10-run1 measured barge-in stop 270ms</code></li></ul>
+<h3>Honesty, hallucination &amp; escalation — 3/5</h3>
+<p>Scored 3 on honesty. See evidence.</p>
+<ul><li><code>A-S10-run1 measured barge-in stop 270ms</code></li></ul>
+</details></div>
+<h2>System B</h2><div class=card>
+<div class=hdr><span class=grade>F</span><span class=chip>59.6/100</span><span class='chip not_ready'>Not ready</span></div>
+<p>Deliberate and unflappable, and far too slow to stop. It finishes its sentence no matter what you do.</p>
+<h3>Required guardrails</h3><ul><li>Turn-taking is a property of the pipeline, not the prompt. This needs a vendor fix.</li></ul>
+<h3>Strengths</h3><ul><li>Never once stopped for a cough or a backchannel.</li><li>Handled the S15 repetition loop by rephrasing rather than repeating.</li></ul>
+<h3>Weaknesses</h3><ul><li>Barge-in stop latency of 2.1s — it effectively cannot be interrupted.</li><li>Median turn latency 1,575ms with a 605ms IQR; the p90 crosses 2s.</li><li>6.5s of dead air on S15 before re-prompting.</li></ul>
+<h3>Worst moment <span class=chip>S10</span></h3>
+<blockquote>(caller: &#x27;Sorry, stop —&#x27;) ...and our private room seats up to twenty-four guests, with a separate...</blockquote><p>It talked over an explicit stop request for two full seconds. Callers hang up on this.</p>
+<details><summary>Per-dimension reasoning</summary>
+<h3>Turn-taking &amp; barge-in — 1/5</h3>
+<p>Scored 1 on turn_taking. See evidence.</p>
+<ul><li><code>B-S10-run1 measured barge-in stop 2130ms</code></li></ul>
+<h3>ASR robustness — 4/5</h3>
+<p>Scored 4 on asr. See evidence.</p>
+<ul><li><code>B-S10-run1 measured barge-in stop 2130ms</code></li></ul>
+<h3>Latency &amp; jitter — 2/5</h3>
+<p>Scored 2 on latency. See evidence.</p>
+<ul><li><code>B-S10-run1 measured barge-in stop 2130ms</code></li></ul>
+<h3>Task completion &amp; correctness — 4/5</h3>
+<p>Scored 4 on task. See evidence.</p>
+<ul><li><code>B-S10-run1 measured barge-in stop 2130ms</code></li></ul>
+<h3>Conversational fluidity &amp; prosody — 3/5</h3>
+<p>Scored 3 on fluidity. See evidence.</p>
+<ul><li><code>B-S10-run1 measured barge-in stop 2130ms</code></li></ul>
+<h3>Patience, empathy &amp; tone control — 4/5</h3>
+<p>Scored 4 on patience. See evidence.</p>
+<ul><li><code>B-S10-run1 measured barge-in stop 2130ms</code></li></ul>
+<h3>Honesty, hallucination &amp; escalation — 4/5</h3>
+<p>Scored 4 on honesty. See evidence.</p>
+<ul><li><code>B-S10-run1 measured barge-in stop 2130ms</code></li></ul>
+</details></div>
+<h2>Failure taxonomy</h2><div class=scroll><table><thead><tr><th>Severity</th><th>Root cause</th><th>Failure</th><th>Systems</th><th>Fixable</th></tr></thead><tbody>
+<tr><td class=crit>critical</td><td>policy</td><td>Invented a corkage fee with a specific price and a specific weekday exemption.</td><td>A</td><td>prompt_or_config</td></tr>
+<tr><td class=crit>critical</td><td>turn_taking</td><td>Continues speaking for ~2s after an explicit interruption.</td><td>B</td><td>inherent</td></tr>
+<tr><td>major</td><td>turn_taking</td><td>Stops speaking for coughs and backchannels.</td><td>A</td><td>prompt_or_config</td></tr>
+<tr><td>minor</td><td>voice_output</td><td>Long dead-air gap before re-prompting on silence.</td><td>B</td><td>prompt_or_config</td></tr>
+</tbody></table></div>
+<h2>What this test did not cover</h2><ul><li>No transcripts were available, so ASR and task scores lean on tester notes alone.</li><li>Add a DTMF scenario — keypad entry is untested and most IVR fallbacks depend on it.</li><li>Add a concurrency scenario — everything here was one call at a time, which hides queueing latency.</li><li>Add a mid-call transfer scenario — handoff to a human was requested but never completed end to end.</li></ul>
+<h2>Blind guess <span class=chip>speculative — scores nothing</span></h2><div class=scroll><table><thead><tr><th>System</th><th>Guess</th><th>Confidence</th><th>Reasoning</th></tr></thead><tbody>
+<tr><td>A</td><td>Speech-to-speech model with an aggressive VAD.</td><td>medium</td><td>Sub-300ms barge-in with no backchannel discrimination is characteristic of raw energy-gated endpointing.</td></tr>
+<tr><td>B</td><td>Cascaded ASR to LLM to TTS with buffered playback.</td><td>medium</td><td>A ~2s stop latency implies a pre-rendered audio buffer that cannot be cancelled mid-chunk.</td></tr>
+</tbody></table></div>
+<footer>Scored by <code>claude-opus-5</code> at effort <code>high</code>. Measured numbers are computed from the waveforms by <code>earshot.audio</code>, not by the model. Generated 2026-09-18 09:59 by <a href='https://github.com/arunash/earshot'>earshot</a>.</footer></div>

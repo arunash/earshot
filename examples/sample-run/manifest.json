@@ -1,0 +1,97 @@
+{
+  "run_id": "e2e",
+  "created": "2026-09-18T09:57:43",
+  "earshot_version": "0.1.0",
+  "battery": "default",
+  "battery_name": "Earshot Standard Battery v1",
+  "profile": "default",
+  "preset": "quick",
+  "runs_per_scenario": 1,
+  "agent_channel": 1,
+  "systems": [
+    {
+      "id": "A",
+      "phone": "+15550001111",
+      "sealed_label": "Y2FuZGlkYXRlLW9uZQ=="
+    },
+    {
+      "id": "B",
+      "phone": "+15550002222",
+      "sealed_label": "Y2FuZGlkYXRlLXR3bw=="
+    }
+  ],
+  "plan": [
+    {
+      "system": "A",
+      "scenario": "S11",
+      "run": 1,
+      "index": 1
+    },
+    {
+      "system": "B",
+      "scenario": "S11",
+      "run": 1,
+      "index": 2
+    },
+    {
+      "system": "A",
+      "scenario": "S05",
+      "run": 1,
+      "index": 3
+    },
+    {
+      "system": "B",
+      "scenario": "S01",
+      "run": 1,
+      "index": 4
+    },
+    {
+      "system": "A",
+      "scenario": "S10",
+      "run": 1,
+      "index": 5
+    },
+    {
+      "system": "B",
+      "scenario": "S10",
+      "run": 1,
+      "index": 6
+    },
+    {
+      "system": "A",
+      "scenario": "S15",
+      "run": 1,
+      "index": 7
+    },
+    {
+      "system": "B",
+      "scenario": "S15",
+      "run": 1,
+      "index": 8
+    },
+    {
+      "system": "A",
+      "scenario": "S01",
+      "run": 1,
+      "index": 9
+    },
+    {
+      "system": "B",
+      "scenario": "S18",
+      "run": 1,
+      "index": 10
+    },
+    {
+      "system": "A",
+      "scenario": "S18",
+      "run": 1,
+      "index": 11
+    },
+    {
+      "system": "B",
+      "scenario": "S05",
+      "run": 1,
+      "index": 12
+    }
+  ]
+}

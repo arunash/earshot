@@ -1,0 +1,17 @@
+# Runs contain real call audio and transcripts - never commit them.
+runs/
+*.wav
+*.mp3
+*.flac
+!examples/**/*.wav
+
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.DS_Store

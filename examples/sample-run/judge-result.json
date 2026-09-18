@@ -1,0 +1,306 @@
+{
+  "verdict": "System A wins by 19 points, and the margin is almost entirely turn-taking. A stops talking 270ms after you interrupt; B keeps going for 2.1 seconds, which on a real line reads as the agent ignoring you. Neither system is clean \u2014 A stops for every cough as well \u2014 but A's defect is tunable and B's is structural.",
+  "ranking": [
+    "A",
+    "B"
+  ],
+  "systems": [
+    {
+      "id": "A",
+      "sketch": "Fast and eager. Stops the instant anything happens on the line \u2014 including things that are not you.",
+      "dimensions": [
+        {
+          "key": "turn_taking",
+          "score": 3,
+          "rationale": "Scored 3 on turn_taking. See evidence.",
+          "evidence": [
+            "A-S10-run1 measured barge-in stop 270ms"
+          ]
+        },
+        {
+          "key": "asr",
+          "score": 4,
+          "rationale": "Scored 4 on asr. See evidence.",
+          "evidence": [
+            "A-S10-run1 measured barge-in stop 270ms"
+          ]
+        },
+        {
+          "key": "latency",
+          "score": 5,
+          "rationale": "Scored 5 on latency. See evidence.",
+          "evidence": [
+            "A-S10-run1 measured barge-in stop 270ms"
+          ]
+        },
+        {
+          "key": "task",
+          "score": 4,
+          "rationale": "Scored 4 on task. See evidence.",
+          "evidence": [
+            "A-S10-run1 measured barge-in stop 270ms"
+          ]
+        },
+        {
+          "key": "fluidity",
+          "score": 4,
+          "rationale": "Scored 4 on fluidity. See evidence.",
+          "evidence": [
+            "A-S10-run1 measured barge-in stop 270ms"
+          ]
+        },
+        {
+          "key": "patience",
+          "score": 4,
+          "rationale": "Scored 4 on patience. See evidence.",
+          "evidence": [
+            "A-S10-run1 measured barge-in stop 270ms"
+          ]
+        },
+        {
+          "key": "honesty",
+          "score": 3,
+          "rationale": "Scored 3 on honesty. See evidence.",
+          "evidence": [
+            "A-S10-run1 measured barge-in stop 270ms"
+          ]
+        }
+      ],
+      "strengths": [
+        "Median turn latency 630ms with a tight 198ms IQR \u2014 it feels calm.",
+        "Yields to every genuine interruption within 300ms.",
+        "Read back the confirmation code character-for-character on S05."
+      ],
+      "weaknesses": [
+        "False-stop rate of 100% on S11: it stopped for every backchannel.",
+        "Invented a corkage fee on S18 run 1.",
+        "Agent talk ratio 0.52 is high for a booking line."
+      ],
+      "worst_moment": {
+        "scenario": "S18",
+        "quote": "Our corkage fee is $25 per bottle, and we waive it on Tuesdays.",
+        "why": "No wine policy exists in this system's configuration. A fluent, specific, entirely invented price is the most expensive failure in the battery."
+      },
+      "deployability": {
+        "status": "ship_with_guardrails",
+        "guardrails": [
+          "Raise the barge-in energy threshold or add a backchannel classifier before launch.",
+          "Constrain pricing answers to a retrieved list; refuse otherwise."
+        ]
+      },
+      "total": 77.0,
+      "grade": "C+",
+      "scored_dimensions": 7,
+      "missing_dimensions": []
+    },
+    {
+      "id": "B",
+      "sketch": "Deliberate and unflappable, and far too slow to stop. It finishes its sentence no matter what you do.",
+      "dimensions": [
+        {
+          "key": "turn_taking",
+          "score": 1,
+          "rationale": "Scored 1 on turn_taking. See evidence.",
+          "evidence": [
+            "B-S10-run1 measured barge-in stop 2130ms"
+          ]
+        },
+        {
+          "key": "asr",
+          "score": 4,
+          "rationale": "Scored 4 on asr. See evidence.",
+          "evidence": [
+            "B-S10-run1 measured barge-in stop 2130ms"
+          ]
+        },
+        {
+          "key": "latency",
+          "score": 2,
+          "rationale": "Scored 2 on latency. See evidence.",
+          "evidence": [
+            "B-S10-run1 measured barge-in stop 2130ms"
+          ]
+        },
+        {
+          "key": "task",
+          "score": 4,
+          "rationale": "Scored 4 on task. See evidence.",
+          "evidence": [
+            "B-S10-run1 measured barge-in stop 2130ms"
+          ]
+        },
+        {
+          "key": "fluidity",
+          "score": 3,
+          "rationale": "Scored 3 on fluidity. See evidence.",
+          "evidence": [
+            "B-S10-run1 measured barge-in stop 2130ms"
+          ]
+        },
+        {
+          "key": "patience",
+          "score": 4,
+          "rationale": "Scored 4 on patience. See evidence.",
+          "evidence": [
+            "B-S10-run1 measured barge-in stop 2130ms"
+          ]
+        },
+        {
+          "key": "honesty",
+          "score": 4,
+          "rationale": "Scored 4 on honesty. See evidence.",
+          "evidence": [
+            "B-S10-run1 measured barge-in stop 2130ms"
+          ]
+        }
+      ],
+      "strengths": [
+        "Never once stopped for a cough or a backchannel.",
+        "Handled the S15 repetition loop by rephrasing rather than repeating."
+      ],
+      "weaknesses": [
+        "Barge-in stop latency of 2.1s \u2014 it effectively cannot be interrupted.",
+        "Median turn latency 1,575ms with a 605ms IQR; the p90 crosses 2s.",
+        "6.5s of dead air on S15 before re-prompting."
+      ],
+      "worst_moment": {
+        "scenario": "S10",
+        "quote": "(caller: 'Sorry, stop \u2014') ...and our private room seats up to twenty-four guests, with a separate...",
+        "why": "It talked over an explicit stop request for two full seconds. Callers hang up on this."
+      },
+      "deployability": {
+        "status": "not_ready",
+        "guardrails": [
+          "Turn-taking is a property of the pipeline, not the prompt. This needs a vendor fix."
+        ]
+      },
+      "total": 59.6,
+      "grade": "F",
+      "scored_dimensions": 7,
+      "missing_dimensions": []
+    }
+  ],
+  "head_to_head": [
+    {
+      "measure": "Barge-in stop latency (median)",
+      "values": [
+        {
+          "system": "A",
+          "value": "270 ms"
+        },
+        {
+          "system": "B",
+          "value": "2,130 ms"
+        }
+      ],
+      "comment": "An 8x gap. This single number decides the test."
+    },
+    {
+      "measure": "False-barge-in rate (S11)",
+      "values": [
+        {
+          "system": "A",
+          "value": "100%"
+        },
+        {
+          "system": "B",
+          "value": "0%"
+        }
+      ],
+      "comment": "The mirror-image defect. A is tunable; B is not."
+    },
+    {
+      "measure": "Turn latency median / p90",
+      "values": [
+        {
+          "system": "A",
+          "value": "630 / 788 ms"
+        },
+        {
+          "system": "B",
+          "value": "1,575 / 2,041 ms"
+        }
+      ],
+      "comment": "B's p90 crosses the 2s threshold where callers start saying 'hello?'"
+    },
+    {
+      "measure": "Alphanumeric capture (S05)",
+      "values": [
+        {
+          "system": "A",
+          "value": "6/6 characters"
+        },
+        {
+          "system": "B",
+          "value": "6/6 characters"
+        }
+      ],
+      "comment": "Both clean. Not a differentiator here."
+    }
+  ],
+  "failure_taxonomy": [
+    {
+      "root_cause": "policy",
+      "failure": "Invented a corkage fee with a specific price and a specific weekday exemption.",
+      "systems": [
+        "A"
+      ],
+      "fixable": "prompt_or_config",
+      "severity": "critical"
+    },
+    {
+      "root_cause": "turn_taking",
+      "failure": "Continues speaking for ~2s after an explicit interruption.",
+      "systems": [
+        "B"
+      ],
+      "fixable": "inherent",
+      "severity": "critical"
+    },
+    {
+      "root_cause": "turn_taking",
+      "failure": "Stops speaking for coughs and backchannels.",
+      "systems": [
+        "A"
+      ],
+      "fixable": "prompt_or_config",
+      "severity": "major"
+    },
+    {
+      "root_cause": "voice_output",
+      "failure": "Long dead-air gap before re-prompting on silence.",
+      "systems": [
+        "B"
+      ],
+      "fixable": "prompt_or_config",
+      "severity": "minor"
+    }
+  ],
+  "methodology_gaps": [
+    "No transcripts were available, so ASR and task scores lean on tester notes alone.",
+    "Add a DTMF scenario \u2014 keypad entry is untested and most IVR fallbacks depend on it.",
+    "Add a concurrency scenario \u2014 everything here was one call at a time, which hides queueing latency.",
+    "Add a mid-call transfer scenario \u2014 handoff to a human was requested but never completed end to end."
+  ],
+  "blind_guess": [
+    {
+      "system": "A",
+      "guess": "Speech-to-speech model with an aggressive VAD.",
+      "reasoning": "Sub-300ms barge-in with no backchannel discrimination is characteristic of raw energy-gated endpointing.",
+      "confidence": "medium"
+    },
+    {
+      "system": "B",
+      "guess": "Cascaded ASR to LLM to TTS with buffered playback.",
+      "reasoning": "A ~2s stop latency implies a pre-rendered audio buffer that cannot be cancelled mid-chunk.",
+      "confidence": "medium"
+    }
+  ],
+  "_meta": {
+    "model": "claude-opus-5",
+    "profile": "default",
+    "effort": "high",
+    "input_tokens": 3499,
+    "output_tokens": 4100
+  }
+}
