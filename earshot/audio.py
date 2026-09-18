@@ -26,6 +26,11 @@ from .util import ffprobe_channels, to_pcm_wav
 CALLER = "caller"
 AGENT = "agent"
 
+# Below this, an alignment is a coincidence rather than a match. Metrics that
+# depend on it are withheld rather than published - a benchmark that reports a
+# wrong number is worse than one that reports none.
+ALIGN_MIN_SIGMA = 5.0
+
 # Tunables. Exposed on the CLI so a noisy line can be re-analyzed without edits.
 DEFAULTS = dict(
     frame_ms=20.0,
@@ -38,6 +43,9 @@ DEFAULTS = dict(
                               # it never heard them - so that is "did not yield"
     dead_air_ms=3000.0,
     backchannel_ms=900.0,   # caller segments shorter than this may be backchannel
+    min_response_ms=150.0,  # nothing answers a phone call faster than this; a
+                            # shorter "gap" is a misalignment or an overlap
+                            # artifact, not a response
 )
 
 
@@ -433,13 +441,16 @@ def analyze(path: "str | Path", workdir: "str | Path",
                 f"Caller turns taken from the baked timeline, aligned at "
                 f"{offset:.2f}s (confidence {align_conf:.1f} sigma). Latency and "
                 f"barge-in are measured against ground truth, not a detector.")
-            if align_conf < 4.0:
+            aligned = align_conf >= ALIGN_MIN_SIGMA
+            if not aligned:
+                caller_segs = []
                 notes.append(
-                    f"ALIGNMENT IS WEAK ({align_conf:.1f} sigma). The recording may "
-                    f"not contain this scenario's audio, or the impairment may be "
-                    f"past what alignment survives. Treat this call's numbers as "
-                    f"unreliable and re-run it.")
-            aligned = True
+                    f"ALIGNMENT FAILED ({align_conf:.1f} sigma, need "
+                    f"{ALIGN_MIN_SIGMA:.1f}). Latency, response rate and barge-in "
+                    f"are NOT reported for this call rather than reported wrongly. "
+                    f"Usual cause: the call ended before most of the audio played, "
+                    f"so there was too little of the reference present to lock on. "
+                    f"A longer script with more speech onsets fixes it.")
         else:
             caller_segs = [Segment(s.start, s.end, CALLER)
                            for s in vad_segments(data[:, ch_caller], sr, **o)]
@@ -479,7 +490,7 @@ def analyze(path: "str | Path", workdir: "str | Path",
         if any(c.end < c2.start < a.start for c2 in caller_segs):
             continue
         gap_ms = (a.start - c.end) * 1000.0
-        if 0.0 <= gap_ms <= 15000.0:
+        if o["min_response_ms"] <= gap_ms <= 15000.0:
             latencies.append(gap_ms)
 
     # --- barge-in: caller starts while the agent is already talking ----------

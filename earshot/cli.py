@@ -516,8 +516,12 @@ def cmd_ingest(a) -> int:
                 "false_triggers": (sum(trig) if trig else None),
                 "agent_turns": sum(c.n_agent_turns for c in calls),
                 "alignment_confidence": (round(min(conf), 1) if conf else None),
-                "repeat_requests": _repeat_requests(rd, sysid, sid, per_call),
-                "echo_correct": _echo_check(rd, sysid, sid, b.expect_echo, per_call),
+                "repeat_requests": _repeat_requests(
+                    rd, sysid, sid, per_call,
+                    script=[t.say for t in sc.turns if t.say]),
+                "echo_correct": _echo_check(
+                    rd, sysid, sid, b.expect_echo, per_call,
+                    script=[t.say for t in sc.turns if t.say]),
             }
         by_scenario[sid] = entry
 
@@ -582,15 +586,45 @@ def _digits_in(text: str) -> str:
     return "".join(out)
 
 
+def _is_crosstalk(text: str, script: List[str], threshold: float = 0.7) -> bool:
+    """Is this "agent" line actually our own audio bleeding onto their leg?
+
+    Phone lines leak. Our played audio shows up quietly on the far-side channel
+    and a transcriber renders it as the agent speaking - which silently turns any
+    transcript-based check into a check on ourselves. It looked like near-perfect
+    digit capture at 0dB SNR through wind, which should have been the giveaway.
+
+    The discriminator is the NON-DIGIT words. Both sides say the digits; only we
+    say "my pin is ... sorry, was that ...", and only the agent says "let me
+    check your pin" or "I heard you say". So compare the surrounding vocabulary
+    and ignore the digits entirely - which also survives the transcriber merging
+    two of our lines into one segment, as it does under noise.
+    """
+    words = lambda t: [w for w in re.findall(r"[a-z0-9']+", (t or "").lower())
+                       if not w.isdigit() and w not in WORD_DIGIT]
+    a = words(text)
+    if len(a) < 3:
+        return True                       # too short to attribute; discard
+    ours = set()
+    for line in script:
+        ours |= set(words(line))
+    if not ours:
+        return False
+    return sum(1 for w in a if w in ours) / len(a) >= threshold
+
+
 def _echo_check(rd: Path, sysid: str, scenario: str, expect: str,
-                per_call: List[Dict[str, Any]]) -> Optional[bool]:
-    """Did the agent repeat the expected digits back, exactly?
+                per_call: List[Dict[str, Any]],
+                script: Optional[List[str]] = None) -> Optional[bool]:
+    """Did the AGENT repeat the expected digits back, exactly?
 
     Returns True (correct), False (echoed something, and it was wrong), or None
-    (never echoed anything, so there is nothing to judge).
+    (never echoed anything, so there is nothing to judge). Crosstalk from our own
+    audio is filtered out first - see _is_crosstalk.
     """
     if not expect:
         return None
+    script = script or []
     saw_any = False
     for p in per_call:
         if p["system"] != sysid or p["scenario"] != scenario:
@@ -601,7 +635,10 @@ def _echo_check(rd: Path, sysid: str, scenario: str, expect: str,
         for turn in read_json(tp).get("turns", []):
             if turn.get("speaker") != "agent":
                 continue
-            got = _digits_in(turn.get("text", ""))
+            text = turn.get("text", "")
+            if _is_crosstalk(text, script):
+                continue
+            got = _digits_in(text)
             if len(got) < len(expect):
                 continue
             saw_any = True
@@ -617,7 +654,8 @@ REPEAT_RE = re.compile(
 
 
 def _repeat_requests(rd: Path, sysid: str, scenario: str,
-                     per_call: List[Dict[str, Any]]) -> Optional[int]:
+                     per_call: List[Dict[str, Any]],
+                     script: Optional[List[str]] = None) -> Optional[int]:
     """How many times the agent asked the caller to repeat themselves.
 
     Under noise this rises before the response rate falls, so it is the earliest
@@ -634,7 +672,9 @@ def _repeat_requests(rd: Path, sysid: str, scenario: str,
         t = read_json(tp)
         total = (total or 0) + sum(
             1 for turn in t.get("turns", [])
-            if turn.get("speaker") == "agent" and REPEAT_RE.search(turn.get("text", "")))
+            if turn.get("speaker") == "agent"
+            and not _is_crosstalk(turn.get("text", ""), script or [])
+            and REPEAT_RE.search(turn.get("text", "")))
     return total
 
 
