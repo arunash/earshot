@@ -266,21 +266,40 @@ def cmd_bake(a) -> int:
             baked[sid] = read_json(dest)
             info(f"[{i}/{len(want)}] {sid} cached ({baked[sid]['condition_label']})")
             continue
-        meta = bake_mod.bake(sc, out, agent_budget_s=a.budget, seed=a.seed)
+        meta = bake_mod.bake(sc, out, agent_budget_s=a.budget, seed=a.seed,
+                             greeting_s=a.greeting)
         baked[sid] = meta
         info(f"[{i}/{len(want)}] {sid} {meta['duration_s']}s - "
              f"{meta['condition_label']}")
 
     m["baked"] = True
+
+    if a.publish:
+        from .assets import publish as publish_assets, verify
+        files = [out / f"{sid}.wav" for sid in sorted(baked)]
+        urls = publish_assets(files)
+        bad = [n for n, u in urls.items() if verify(u) != 200]
+        if bad:
+            die(f"published but not reachable: {', '.join(bad)}. "
+                f"Do not start a run against these.")
+        m["audio_urls"] = urls
+        info(f"all {len(urls)} asset(s) verified reachable")
+
     write_json(rd / "manifest.json", m)
     print()
     print(bold(f"{len(baked)} file(s) in {out}"))
     print()
-    print(dim("  Baked audio is played with <Play>, which needs a public URL:"))
-    print(f"    earshot serve --run {m['run_id']} &")
-    print("    cloudflared tunnel --url http://localhost:8787")
-    print("    export EARSHOT_PUBLIC_URL=https://<tunnel>")
-    print(f"    earshot call {m['run_id']}")
+    if m.get("audio_urls"):
+        print(dim("  Hosted on Twilio - no tunnel needed:"))
+        print(f"    {cyan('earshot call ' + m['run_id'])}")
+    else:
+        print(dim("  Baked audio plays with <Play>, which needs a public URL."))
+        print(dim("  Simplest (no tunnel, hosts on Twilio's own CDN):"))
+        print(f"    {cyan('earshot bake ' + m['run_id'] + ' --publish')}")
+        print(dim("  Or serve it yourself:"))
+        print(f"    earshot serve --run {m['run_id']} &")
+        print("    cloudflared tunnel --url http://localhost:8787")
+        print("    export EARSHOT_PUBLIC_URL=https://<tunnel>")
     print()
     print(dim("  Caller turns will come from the baked timeline rather than a "
               "detector, so latency and barge-in stay measurable at any SNR."))
@@ -498,6 +517,7 @@ def cmd_ingest(a) -> int:
                 "agent_turns": sum(c.n_agent_turns for c in calls),
                 "alignment_confidence": (round(min(conf), 1) if conf else None),
                 "repeat_requests": _repeat_requests(rd, sysid, sid, per_call),
+                "echo_correct": _echo_check(rd, sysid, sid, b.expect_echo, per_call),
             }
         by_scenario[sid] = entry
 
@@ -544,6 +564,50 @@ def cmd_ingest(a) -> int:
     print(f"wrote {cyan(str(rd / 'analysis.json'))}")
     print(f"next: {cyan('earshot judge ' + m['run_id'])}")
     return 0
+
+
+WORD_DIGIT = {"zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3",
+              "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8",
+              "nine": "9"}
+
+
+def _digits_in(text: str) -> str:
+    """Every digit in a line, however it was written: 4729, 4-7-2-9, four seven..."""
+    out = []
+    for tok in re.findall(r"[A-Za-z]+|\d", text.lower()):
+        if tok.isdigit():
+            out.append(tok)
+        elif tok in WORD_DIGIT:
+            out.append(WORD_DIGIT[tok])
+    return "".join(out)
+
+
+def _echo_check(rd: Path, sysid: str, scenario: str, expect: str,
+                per_call: List[Dict[str, Any]]) -> Optional[bool]:
+    """Did the agent repeat the expected digits back, exactly?
+
+    Returns True (correct), False (echoed something, and it was wrong), or None
+    (never echoed anything, so there is nothing to judge).
+    """
+    if not expect:
+        return None
+    saw_any = False
+    for p in per_call:
+        if p["system"] != sysid or p["scenario"] != scenario:
+            continue
+        tp = rd / "transcripts" / f"{sysid}-{scenario}-run{p['run']}.json"
+        if not tp.exists():
+            continue
+        for turn in read_json(tp).get("turns", []):
+            if turn.get("speaker") != "agent":
+                continue
+            got = _digits_in(turn.get("text", ""))
+            if len(got) < len(expect):
+                continue
+            saw_any = True
+            if expect in got:
+                return True
+    return False if saw_any else None
 
 
 REPEAT_RE = re.compile(
@@ -811,7 +875,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--only", help="comma-separated scenario ids")
     s.add_argument("--budget", type=float, default=6.0,
                    help="assumed agent turn length in seconds")
+    s.add_argument("--greeting", type=float, default=4.0,
+                   help="silence before the first line, while the agent greets")
     s.add_argument("--seed", type=int, default=0)
+    s.add_argument("--publish", action="store_true",
+                   help="upload to Twilio Assets so <Play> needs no tunnel")
     s.add_argument("--force", action="store_true")
     s.set_defaults(func=cmd_bake)
 

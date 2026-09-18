@@ -170,7 +170,7 @@ def place_calls(manifest: Dict[str, Any], plan: List[Dict[str, Any]],
     rec_dir.mkdir(parents=True, exist_ok=True)
     results: List[Dict[str, Any]] = []
 
-    for item in plan:
+    for n_done, item in enumerate(plan, 1):
         sysid, scn, rn = item["system"], item["scenario"], item["run"]
         to = numbers.get(sysid)
         if not to:
@@ -178,17 +178,21 @@ def place_calls(manifest: Dict[str, Any], plan: List[Dict[str, Any]],
             continue
         dest = rec_dir / f"{sysid}-{scn}-run{rn}.wav"
         if dest.exists():
-            info(f"[{item['index']}/{len(plan)}] {dest.name} exists, skipping")
+            info(f"[{n_done}/{len(plan)}] {dest.name} exists, skipping")
             continue
 
         baked = Path(run_dir) / "audio" / f"{scn}.wav"
+        hosted = (manifest.get("audio_urls") or {}).get(f"{scn}.wav")
         kwargs: Dict[str, Any] = {}
         if baked.exists():
-            if not base.startswith("https://"):
+            if hosted:
+                markup = play_twiml(hosted)          # Twilio's own CDN
+            elif base.startswith("https://"):
+                markup = play_twiml(f"{base}/audio/{scn}.wav")
+            else:
                 die(f"{scn} has baked audio, which Twilio plays from a URL. "
-                    f"Run `earshot serve --run <id>`, expose it, and set "
-                    f"EARSHOT_PUBLIC_URL.")
-            markup = play_twiml(f"{base}/audio/{scn}.wav")
+                    f"Either `earshot bake <run> --publish` to host it on "
+                    f"Twilio, or serve it yourself and set EARSHOT_PUBLIC_URL.")
             kwargs["twiml"] = markup
         else:
             markup = build_twiml(battery.get(scn), budget_s)
@@ -203,8 +207,7 @@ def place_calls(manifest: Dict[str, Any], plan: List[Dict[str, Any]],
                 f"{TWIML_INLINE_LIMIT}-char inline limit. Run `earshot serve`, "
                 f"expose it, and set EARSHOT_PUBLIC_URL.")
 
-        info(f"[{item['index']}/{len(plan)}] calling {sysid} ({to}) with {scn} "
-             f"run {rn}")
+        info(f"[{n_done}/{len(plan)}] calling {sysid} ({to}) with {scn} run {rn}")
         call = client.calls.create(
             to=to, from_=from_number,
             record=True, recording_channels="dual",

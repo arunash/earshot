@@ -509,11 +509,15 @@ def _health(cell: Dict[str, Any]) -> str:
     failure no latency number can offset. Without it, latency carries the cell
     against the same 800ms / 1.5s thresholds the scale uses.
     """
+    if cell.get("echo_correct") is False:
+        return "crit"
     rr = cell.get("response_rate")
     if rr is not None:
         if rr < 0.75:
             return "crit"
         if rr < 0.95 or (cell.get("false_triggers") or 0) > 0:
+            return "warn"
+        if cell.get("echo_correct") is None and "echo_correct" in cell:
             return "warn"
         return "good" if not (cell.get("repeat_requests") or 0) else "warn"
     lat = cell.get("latency_median_ms")
@@ -529,6 +533,13 @@ def _health(cell: Dict[str, Any]) -> str:
 def _cell_text(cell: Dict[str, Any]) -> List[str]:
     """The two or three numbers worth showing in a matrix cell."""
     out = []
+    ec = cell.get("echo_correct")
+    if ec is True:
+        out.append("digits correct")
+    elif ec is False:
+        out.append("DIGITS WRONG")
+    elif "echo_correct" in cell:
+        out.append("no read-back")
     rr = cell.get("response_rate")
     if rr is not None:
         out.append(f"{rr * 100:.0f}% answered")

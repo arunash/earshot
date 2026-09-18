@@ -79,6 +79,11 @@ class Battery:
     default_gap_ms: int
     context: str
     scenarios: List[Scenario]
+    # A digit string the agent is expected to repeat back, e.g. a PIN. When the
+    # agent echoes what it heard, hearing accuracy stops being a judgement call
+    # and becomes a string comparison - which is the strongest kind of evidence
+    # a noise ladder can produce.
+    expect_echo: Optional[str] = None
 
     def get(self, sid: str) -> Scenario:
         for s in self.scenarios:
@@ -179,4 +184,5 @@ def load(path_or_id: str = "default") -> Battery:
         default_gap_ms=gap,
         context=(raw.get("context") or "").strip(),
         scenarios=scenarios,
+        expect_echo=(str(raw["expect_echo"]) if raw.get("expect_echo") else None),
     )

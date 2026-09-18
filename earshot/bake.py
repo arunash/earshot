@@ -80,7 +80,7 @@ def render_scenario(scenario: Scenario, agent_budget_s: float = 6.0,
 
 
 def bake(scenario: Scenario, out_dir: "str | Path", agent_budget_s: float = 6.0,
-         seed: int = 0, sr: int = SR) -> Dict[str, Any]:
+         seed: int = 0, sr: int = SR, greeting_s: float = 4.0) -> Dict[str, Any]:
     """Render, impair, and write <id>.wav + <id>.ref.wav + <id>.timeline.json.
 
     The clean reference is kept because it is what the recording gets aligned
@@ -89,7 +89,8 @@ def bake(scenario: Scenario, out_dir: "str | Path", agent_budget_s: float = 6.0,
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    clean, timeline = render_scenario(scenario, agent_budget_s, sr=sr)
+    clean, timeline = render_scenario(scenario, agent_budget_s,
+                                      greeting_s=greeting_s, sr=sr)
 
     cond = dict(scenario.condition or {})
     played = impair.apply_condition(clean, sr, cond, seed=seed) if cond else clean
@@ -107,6 +108,7 @@ def bake(scenario: Scenario, out_dir: "str | Path", agent_budget_s: float = 6.0,
         "duration_s": round(len(played) / sr, 2),
         "sample_rate": sr,
         "agent_budget_s": agent_budget_s,
+        "greeting_s": greeting_s,
         "seed": seed,
         "audio": wav.name,
         "reference": ref.name,

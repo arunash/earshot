@@ -18,8 +18,11 @@ from .util import bold, cyan, dim, info, warn, yellow
 AUDIO_EXT = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".aac", ".mp4", ".caf"}
 
 # <system>-<scenario>-run<n>.<ext>, tolerant about separators and case.
+# The scenario is any letter-prefixed id, not just S-numbers: the robustness
+# ladder uses N/J/C/D/X prefixes to group its rungs by what they impair.
 NAME_RE = re.compile(
-    r"^(?P<system>[A-Za-z0-9]+)[-_](?P<scenario>S\d{2})[-_]?(?:run)?(?P<run>\d+)?$",
+    r"^(?P<system>[A-Za-z0-9]+)[-_](?P<scenario>[A-Za-z]{1,3}\d{2,3})"
+    r"[-_]?(?:run)?(?P<run>\d+)?$",
     re.IGNORECASE,
 )
 
