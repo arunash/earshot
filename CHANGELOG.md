@@ -29,3 +29,26 @@ First release.
   metric was computed against the harness's own leg. `--agent-channel` now
   defaults to `auto` and picks whichever channel speaks first, warning when the
   margin is under 0.75s.
+
+## Unreleased (noise & network)
+
+- **Robustness ladder** (`--battery robustness`): 21 rungs of one fixed script
+  under babble, television, road, traffic and wind at measured SNRs, plus G.726
+  and Opus codecs, packet loss concealed and unconcealed, jitter, dropouts, and
+  all of it at once.
+- `earshot bake` renders the harness's own side of the call with local TTS,
+  mixes a **synthesized** noise bed at a measured SNR (no corpus to download,
+  reproducible from a seed), and degrades it through a real codec and a lossy
+  network.
+- **Measurement survives the impairment.** Baking means the exact caller
+  timeline is known, so the caller side needs no voice-activity detector. The
+  played audio is located in the recording by correlating onset-emphasized
+  energy envelopes, which hold where a waveform correlation fails: 0ms alignment
+  error and 12ms latency error at -5dB SNR babble, through G.726, and under 20%
+  packet loss. `earshot selftest --impaired` guards it.
+- New metrics from the timeline: **response rate**, **false triggers** (the
+  agent answering the noise), and repeat requests parsed from the transcript.
+- Report gains a **scenario matrix** - one row per scenario so you see where a
+  system breaks, not just that its average slipped - and **the script**,
+  verbatim, because a benchmark that does not publish what it said cannot be
+  reproduced.

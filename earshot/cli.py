@@ -143,8 +143,12 @@ def _check_twilio() -> None:
 
 
 def cmd_selftest(a) -> int:
-    from .selftest import run
-    return 0 if run() else 1
+    from .selftest import run, run_impaired
+    ok = run()
+    if a.impaired or a.all:
+        print()
+        ok = run_impaired() and ok
+    return 0 if ok else 1
 
 
 # ---------------------------------------------------------------------- new --
@@ -235,6 +239,51 @@ def cmd_new(a) -> int:
           f"{cyan('earshot report ' + run_id)}")
     print()
     print(dim("  Record in DUAL CHANNEL if you can — mono cannot measure barge-in."))
+    return 0
+
+
+def cmd_bake(a) -> int:
+    """Render each scenario's audio, impaired per its condition."""
+    from . import bake as bake_mod
+    from . import tts
+    rd = _run_dir(a.run)
+    m = read_json(rd / "manifest.json")
+    b = battery_mod.load(m["battery"])
+    if tts.engine() is None:
+        die("No local TTS found. macOS has `say`; on Linux install espeak-ng.")
+
+    want = sorted({p["scenario"] for p in m["plan"]})
+    if a.only:
+        want = [s.strip().upper() for s in a.only.split(",")]
+    out = rd / "audio"
+    info(f"baking {len(want)} scenario(s) with {tts.engine()} -> {out}")
+
+    baked = {}
+    for i, sid in enumerate(want, 1):
+        sc = b.get(sid)
+        dest = out / f"{sid}.timeline.json"
+        if dest.exists() and not a.force:
+            baked[sid] = read_json(dest)
+            info(f"[{i}/{len(want)}] {sid} cached ({baked[sid]['condition_label']})")
+            continue
+        meta = bake_mod.bake(sc, out, agent_budget_s=a.budget, seed=a.seed)
+        baked[sid] = meta
+        info(f"[{i}/{len(want)}] {sid} {meta['duration_s']}s - "
+             f"{meta['condition_label']}")
+
+    m["baked"] = True
+    write_json(rd / "manifest.json", m)
+    print()
+    print(bold(f"{len(baked)} file(s) in {out}"))
+    print()
+    print(dim("  Baked audio is played with <Play>, which needs a public URL:"))
+    print(f"    earshot serve --run {m['run_id']} &")
+    print("    cloudflared tunnel --url http://localhost:8787")
+    print("    export EARSHOT_PUBLIC_URL=https://<tunnel>")
+    print(f"    earshot call {m['run_id']}")
+    print()
+    print(dim("  Caller turns will come from the baked timeline rather than a "
+              "detector, so latency and barge-in stay measurable at any SNR."))
     return 0
 
 
@@ -336,7 +385,14 @@ def cmd_ingest(a) -> int:
             info(f"[{i}/{len(found)}] {stem} cached")
         else:
             info(f"[{i}/{len(found)}] analyzing {stem}")
-            cm = analyze(rec["path"], work, agent_channel=agent_ch)
+            tl = rd / "audio" / f"{rec['scenario']}.timeline.json"
+            ref_path = timeline = None
+            if tl.exists():
+                meta = read_json(tl)
+                ref_path = rd / "audio" / meta["audio"]   # the impaired file we played
+                timeline = meta["timeline"]
+            cm = analyze(rec["path"], work, agent_channel=agent_ch,
+                         reference=ref_path, timeline=timeline)
             cm_dict = cm.to_dict(include_segments=True)
             write_json(mpath, cm_dict)
 
@@ -395,10 +451,62 @@ def cmd_ingest(a) -> int:
         measured[s] = aggregate(c)
         measured[s]["barge_in_by_expectation"] = aggregate_by_expectation(
             pairs_by_system[s])
+    # --- per-scenario rollup: the matrix in the report is built from this ---
+    from .bake import describe as describe_cond
+    by_scenario: Dict[str, Any] = {}
+    for sid in sorted({p["scenario"] for p in per_call}):
+        sc = b.get(sid)
+        tl = rd / "audio" / f"{sid}.timeline.json"
+        meta = read_json(tl) if tl.exists() else None
+        entry = {
+            "name": sc.name,
+            "intent": sc.intent,
+            "condition": describe_cond(sc.condition),
+            "barge_expectation": sc.barge_expectation,
+            "baked": meta is not None,
+            "script": (
+                [{"start": t["start"], "end": t["end"], "text": t["text"],
+                  "barge_in": t["barge_in"]} for t in meta["timeline"]]
+                if meta else
+                [{"text": t.say, "barge_in": t.is_barge_in, "wait": t.wait,
+                  "offset_ms": t.offset_ms, "voice": t.voice}
+                 for t in sc.turns if t.say]),
+            "systems": {},
+        }
+        for sysid in systems:
+            calls = [CallMetrics(**dict(
+                        {k: v for k, v in read_json(
+                            rd / "metrics" /
+                            f"{sysid}-{sid}-run{p['run']}.json").items()
+                         if k != "segments"},
+                        barge_ins=[]))
+                     for p in per_call
+                     if p["system"] == sysid and p["scenario"] == sid]
+            if not calls:
+                continue
+            lat = [v for c in calls for v in c.response_latency_ms]
+            rates = [c.response_rate for c in calls if c.response_rate is not None]
+            trig = [c.false_triggers for c in calls if c.false_triggers is not None]
+            conf = [c.alignment_confidence for c in calls
+                    if c.alignment_confidence is not None]
+            entry["systems"][sysid] = {
+                "runs": len(calls),
+                "latency_median_ms": (round(float(np_median(lat)), 1) if lat else None),
+                "latency_p90_ms": (round(float(np_pct(lat, 90)), 1) if lat else None),
+                "response_rate": (round(sum(rates) / len(rates), 3) if rates else None),
+                "false_triggers": (sum(trig) if trig else None),
+                "agent_turns": sum(c.n_agent_turns for c in calls),
+                "alignment_confidence": (round(min(conf), 1) if conf else None),
+                "repeat_requests": _repeat_requests(rd, sysid, sid, per_call),
+            }
+        by_scenario[sid] = entry
+
     analysis = {
         "run_id": m["run_id"],
         "systems": systems,
+        "battery": m["battery"],
         "measured": measured,
+        "by_scenario": by_scenario,
         "qa": qa,
         "per_call": per_call,
     }
@@ -436,6 +544,44 @@ def cmd_ingest(a) -> int:
     print(f"wrote {cyan(str(rd / 'analysis.json'))}")
     print(f"next: {cyan('earshot judge ' + m['run_id'])}")
     return 0
+
+
+REPEAT_RE = re.compile(
+    r"\b(say that again|repeat that|didn.?t (?:quite )?(?:catch|get|hear)|"
+    r"come again|could you repeat|one more time|i missed that|"
+    r"i didn.?t understand|sorry,? what)\b", re.I)
+
+
+def _repeat_requests(rd: Path, sysid: str, scenario: str,
+                     per_call: List[Dict[str, Any]]) -> Optional[int]:
+    """How many times the agent asked the caller to repeat themselves.
+
+    Under noise this rises before the response rate falls, so it is the earliest
+    signal that a system is struggling - it is still working, but it is making
+    the caller work too.
+    """
+    total = None
+    for p in per_call:
+        if p["system"] != sysid or p["scenario"] != scenario:
+            continue
+        tp = rd / "transcripts" / f"{sysid}-{scenario}-run{p['run']}.json"
+        if not tp.exists():
+            continue
+        t = read_json(tp)
+        total = (total or 0) + sum(
+            1 for turn in t.get("turns", [])
+            if turn.get("speaker") == "agent" and REPEAT_RE.search(turn.get("text", "")))
+    return total
+
+
+def np_median(v):
+    import numpy as _np
+    return _np.percentile(v, 50)
+
+
+def np_pct(v, p):
+    import numpy as _np
+    return _np.percentile(v, p)
 
 
 def _fmt(v, unit="") -> str:
@@ -541,7 +687,9 @@ def cmd_report(a) -> int:
     if "systems" in result and not result["systems"][0].get("total"):
         result = judge_mod.apply_scores(result, m.get("profile", "default"))
         write_json(rp, result)
-    measured = read_json(rd / "analysis.json")["measured"]
+    analysis = read_json(rd / "analysis.json")
+    measured = analysis["measured"]
+    m = dict(m, _by_scenario=analysis.get("by_scenario", {}))
 
     md = report.markdown(result, measured, m)
     (rd / "REPORT.md").write_text(md, encoding="utf-8")
@@ -572,8 +720,14 @@ def cmd_report(a) -> int:
 
 def cmd_serve(a) -> int:
     from .runner_twilio import serve
-    serve(battery_mod.load(a.battery), host=a.host, port=a.port,
-          agent_budget_s=a.budget)
+    audio_dir = None
+    battery_id = a.battery
+    if a.run:
+        rd = _run_dir(a.run)
+        audio_dir = rd / "audio"
+        battery_id = read_json(rd / "manifest.json")["battery"]
+    serve(battery_mod.load(battery_id), host=a.host, port=a.port,
+          agent_budget_s=a.budget, audio_dir=audio_dir)
     return 0
 
 
@@ -620,6 +774,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_doctor)
 
     s = sub.add_parser("selftest", help="verify the analyzer against known ground truth")
+    s.add_argument("--impaired", action="store_true",
+                   help="also verify measurement survives noise and packet loss")
+    s.add_argument("--all", action="store_true")
     s.set_defaults(func=cmd_selftest)
 
     s = sub.add_parser("rubric", help="print the scoring rubric")
@@ -647,6 +804,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="randomize which number gets which letter")
     s.add_argument("--force", action="store_true")
     s.set_defaults(func=cmd_new)
+
+    s = sub.add_parser("bake", help="render scenario audio with noise and "
+                                    "channel impairment")
+    s.add_argument("run")
+    s.add_argument("--only", help="comma-separated scenario ids")
+    s.add_argument("--budget", type=float, default=6.0,
+                   help="assumed agent turn length in seconds")
+    s.add_argument("--seed", type=int, default=0)
+    s.add_argument("--force", action="store_true")
+    s.set_defaults(func=cmd_bake)
 
     s = sub.add_parser("sheet", help="print a run's call sheet")
     s.add_argument("run")
@@ -687,7 +854,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("run")
     s.set_defaults(func=cmd_unseal)
 
-    s = sub.add_parser("serve", help="TwiML server for automated calling")
+    s = sub.add_parser("serve", help="TwiML server + baked audio for automated calling")
+    s.add_argument("--run", help="serve this run's baked audio too")
     s.add_argument("--battery", default="default")
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8787)

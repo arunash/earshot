@@ -47,6 +47,9 @@ class Scenario:
     dimensions: List[str] = field(default_factory=list)
     setup: Dict[str, Any] = field(default_factory=dict)
     barge_expectation: str = "none"
+    # Impairment applied to the harness's own audio when the scenario is baked:
+    # {noise, snr_db, codec, packet_loss, jitter, dropouts, clip_db}
+    condition: Dict[str, Any] = field(default_factory=dict)
     turns: List[Turn] = field(default_factory=list)
     tester_script: str = ""
     pass_signals: List[str] = field(default_factory=list)
@@ -61,6 +64,7 @@ class Scenario:
             "dimensions": self.dimensions,
             "setup": self.setup,
             "barge_expectation": self.barge_expectation,
+            "condition": self.condition,
             "pass_signals": self.pass_signals,
             "fail_signals": self.fail_signals,
         }
@@ -159,6 +163,7 @@ def load(path_or_id: str = "default") -> Battery:
             dimensions=s.get("dimensions", []),
             setup=s.get("setup", {}) or {},
             barge_expectation=s.get("barge_expectation", "none"),
+            condition=s.get("condition", {}) or {},
             turns=[_turn(t, gap) for t in s.get("turns", [])],
             tester_script=(s.get("tester_script") or "").strip(),
             pass_signals=s.get("pass_signals", []) or [],

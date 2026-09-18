@@ -26,6 +26,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from xml.sax.saxutils import escape as xesc
 
+from pathlib import Path
+
 from .battery import Battery, Scenario, VOICES
 from .util import die, dim, info, warn
 
@@ -74,7 +76,8 @@ def build_twiml(scenario: Scenario, agent_budget_s: float = DEFAULT_AGENT_BUDGET
 # ------------------------------------------------------------------- server --
 
 
-def make_app(battery: Battery, agent_budget_s: float = DEFAULT_AGENT_BUDGET_S):
+def make_app(battery: Battery, agent_budget_s: float = DEFAULT_AGENT_BUDGET_S,
+             audio_dir=None):
     try:
         from flask import Flask, Response, request
     except ImportError:
@@ -87,21 +90,40 @@ def make_app(battery: Battery, agent_budget_s: float = DEFAULT_AGENT_BUDGET_S):
         return {"ok": True, "battery": battery.id,
                 "scenarios": [s.id for s in battery.scenarios]}
 
+    @app.route("/audio/<path:name>")
+    def audio(name):
+        from flask import send_from_directory
+        if audio_dir is None:
+            return ("no baked audio is being served; "
+                    "start with `earshot serve --run <id>`", 404)
+        return send_from_directory(str(Path(audio_dir).resolve()), name)
+
     @app.route("/twiml/<scenario>", methods=["GET", "POST"])
     def twiml(scenario):
         sc = battery.get(scenario)
         budget = float(request.args.get("budget", agent_budget_s))
+        play = request.args.get("play")
+        if play:
+            return Response(play_twiml(play), mimetype="text/xml")
         return Response(build_twiml(sc, budget), mimetype="text/xml")
 
     return app
 
 
+def play_twiml(url: str) -> str:
+    """One <Play> of a baked file. The whole scenario is inside the audio."""
+    return ("<?xml version='1.0' encoding='UTF-8'?>\n<Response>\n"
+            f"  <Play>{xesc(url)}</Play>\n  <Pause length=\"3\"/>\n</Response>")
+
+
 def serve(battery: Battery, host: str = "0.0.0.0", port: int = 8787,
-          agent_budget_s: float = DEFAULT_AGENT_BUDGET_S) -> None:
-    app = make_app(battery, agent_budget_s)
+          agent_budget_s: float = DEFAULT_AGENT_BUDGET_S, audio_dir=None) -> None:
+    app = make_app(battery, agent_budget_s, audio_dir)
     info(f"TwiML server on http://{host}:{port}  "
          f"(expose it and set EARSHOT_PUBLIC_URL to the public https URL)")
-    info(f"  test: curl http://127.0.0.1:{port}/twiml/S10")
+    info(f"  test: curl http://127.0.0.1:{port}/twiml/{battery.scenarios[0].id}")
+    if audio_dir:
+        info(f"  serving baked audio from {audio_dir}")
     app.run(host=host, port=port)
 
 
@@ -159,9 +181,20 @@ def place_calls(manifest: Dict[str, Any], plan: List[Dict[str, Any]],
             info(f"[{item['index']}/{len(plan)}] {dest.name} exists, skipping")
             continue
 
-        markup = build_twiml(battery.get(scn), budget_s)
+        baked = Path(run_dir) / "audio" / f"{scn}.wav"
         kwargs: Dict[str, Any] = {}
-        if len(markup) <= TWIML_INLINE_LIMIT:
+        if baked.exists():
+            if not base.startswith("https://"):
+                die(f"{scn} has baked audio, which Twilio plays from a URL. "
+                    f"Run `earshot serve --run <id>`, expose it, and set "
+                    f"EARSHOT_PUBLIC_URL.")
+            markup = play_twiml(f"{base}/audio/{scn}.wav")
+            kwargs["twiml"] = markup
+        else:
+            markup = build_twiml(battery.get(scn), budget_s)
+        if "twiml" in kwargs:
+            pass
+        elif len(markup) <= TWIML_INLINE_LIMIT:
             kwargs["twiml"] = markup          # no public URL needed
         elif base.startswith("https://"):
             kwargs["url"] = f"{base}/twiml/{scn}?budget={budget_s}"

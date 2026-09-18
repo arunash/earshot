@@ -1,0 +1,238 @@
+# Earshot Robustness Ladder v1
+#
+# ONE script, eighteen channel conditions. The script never changes, so the only
+# variable between rungs is the impairment - which is the whole point: you are
+# looking for the rung where each system stops working, not for a score.
+#
+# Requires baked audio: `earshot bake <run>` renders the script, mixes the noise
+# bed at a measured SNR, degrades it through a codec and a lossy network, and
+# writes the exact timeline alongside. Metrics are then measured against that
+# timeline rather than a voice-activity detector, which is what keeps latency
+# and barge-in measurable at 0dB SNR.
+#
+# Swap the `say` lines for your own domain. Keep the SHAPE: a greeting, a piece
+# of alphanumeric data, a correction, and a read-back request. Those four turns
+# are what make degradation visible.
+
+id: robustness
+name: Earshot Robustness Ladder
+version: 1
+runs_per_scenario: 1
+default_gap_ms: 300
+
+context: |
+  Every scenario below runs the identical four-turn script under a different
+  channel condition. Compare rungs against N00, the clean control. The finding
+  is the rung at which a system's response rate falls or its latency climbs -
+  not the absolute score on any single rung.
+
+# The shared script, referenced by every scenario via YAML anchors.
+_script: &script
+  - { wait: after_agent, say: "Hi, I need to sort out a booking." }
+  - { wait: after_agent, say: "The reference is 7 K M 4 Q 2." }
+  - { wait: after_agent, say: "Sorry, that last character was a 2, not a 3." }
+  - { wait: after_agent, say: "Can you read the whole reference back to me?" }
+
+_pass: &pass ["answers every turn", "reads the reference back correctly"]
+_fail: &fail ["asks for a repeat", "stops responding", "responds to the noise itself"]
+
+scenarios:
+
+  - id: N00
+    name: Clean control
+    intent: The baseline every other rung is read against. Never skip it.
+    dimensions: [asr, latency, turn_taking]
+    condition: {}
+    turns: *script
+    tester_script: "Quiet line, no impairment. This is the reference measurement."
+    pass_signals: *pass
+    fail_signals: *fail
+
+  # ---- multi-talker babble: the cafe ladder -------------------------------
+  - id: N01
+    name: Babble 24dB SNR
+    intent: Noise is present but trivially separable. Almost nothing should fail here.
+    dimensions: [asr]
+    condition: { noise: babble, snr_db: 24 }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  - id: N02
+    name: Babble 18dB SNR
+    intent: A quiet restaurant. A competent stack is unaffected.
+    dimensions: [asr]
+    condition: { noise: babble, snr_db: 18 }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  - id: N03
+    name: Babble 12dB SNR
+    intent: A busy cafe. Where weaker front-ends begin to slip.
+    dimensions: [asr]
+    condition: { noise: babble, snr_db: 12 }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  - id: N04
+    name: Babble 6dB SNR
+    intent: A loud bar. The rung that usually separates the field.
+    dimensions: [asr]
+    condition: { noise: babble, snr_db: 6 }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  - id: N05
+    name: Babble 0dB SNR
+    intent: Noise as loud as the speaker. Humans still manage this; most ASR does not.
+    dimensions: [asr]
+    condition: { noise: babble, snr_db: 0 }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  # ---- one intelligible talker: the endpointer killer ---------------------
+  - id: N06
+    name: Television 18dB SNR
+    intent: A single intelligible talker with phrase pauses, quiet.
+    dimensions: [asr, turn_taking]
+    condition: { noise: tv, snr_db: 18 }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  - id: N07
+    name: Television 12dB SNR
+    intent: Every pause in the broadcast looks like a turn boundary to an endpointer.
+    dimensions: [asr, turn_taking]
+    condition: { noise: tv, snr_db: 12 }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  - id: N08
+    name: Television 6dB SNR
+    intent: The hardest acoustic condition in the ladder, and the most common at home.
+    dimensions: [asr, turn_taking]
+    condition: { noise: tv, snr_db: 6 }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  # ---- where a rideshare or delivery caller actually stands ---------------
+  - id: N09
+    name: In-car road noise 6dB SNR
+    intent: Low-frequency rumble. Cheap high-pass front-ends handle it; some do not.
+    dimensions: [asr]
+    condition: { noise: road, snr_db: 6 }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  - id: N10
+    name: Curbside traffic 6dB SNR
+    intent: Road bed plus vehicles passing - non-stationary, which is the hard part.
+    dimensions: [asr]
+    condition: { noise: traffic, snr_db: 6 }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  - id: N11
+    name: Wind buffeting 6dB SNR
+    intent: Gusts produce hard broadband transients that look like plosives.
+    dimensions: [asr]
+    condition: { noise: wind, snr_db: 6 }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  # ---- codec ---------------------------------------------------------------
+  - id: C01
+    name: G.726 at 16kbps
+    intent: A genuinely bad PSTN leg, through the codec the PSTN actually uses.
+    dimensions: [asr]
+    condition: { codec: "g726:16000" }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  - id: C02
+    name: Opus at 8kbps
+    intent: A starved VoIP leg. Different artifacts from G.726 - often a different result.
+    dimensions: [asr]
+    condition: { codec: "opus:8000" }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  # ---- network -------------------------------------------------------------
+  - id: J01
+    name: Packet loss 5%
+    intent: A mildly lossy mobile leg, concealed by the jitter buffer.
+    dimensions: [asr, latency]
+    condition: { packet_loss: 0.05, conceal: true }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  - id: J02
+    name: Packet loss 15%
+    intent: A bad leg. Concealment turns this into audible stutter.
+    dimensions: [asr, latency]
+    condition: { packet_loss: 0.15, conceal: true }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  - id: J03
+    name: Packet loss 15%, unconcealed
+    intent: The same loss as holes rather than stutter. Front-ends differ sharply here.
+    dimensions: [asr]
+    condition: { packet_loss: 0.15, conceal: false }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  - id: J04
+    name: Jitter 15%
+    intent: Buffer re-timing - frames duplicated and dropped to absorb delay variation.
+    dimensions: [asr, latency]
+    condition: { jitter: 0.15 }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  - id: J05
+    name: Jitter 30%
+    intent: Severe re-timing. Speech rate itself becomes unstable.
+    dimensions: [asr, latency]
+    condition: { jitter: 0.30 }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  - id: D01
+    name: Dropouts
+    intent: Three 320ms holes - a lift, a tunnel, a cell handover mid-sentence.
+    dimensions: [asr, turn_taking]
+    condition: { dropouts: 3, dropout_ms: 320 }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail
+
+  # ---- everything at once --------------------------------------------------
+  - id: X01
+    name: The bad day
+    intent: >
+      A loud room, a bad codec and a lossy network together. Nothing about this
+      is unrealistic - it is a caller standing outside a bar on a weak connection,
+      which is a meaningful share of real traffic.
+    dimensions: [asr, latency, turn_taking]
+    condition: { noise: babble, snr_db: 8, codec: "g726:16000", packet_loss: 0.08 }
+    turns: *script
+    pass_signals: *pass
+    fail_signals: *fail

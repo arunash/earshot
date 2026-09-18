@@ -80,6 +80,44 @@ within 60ms.
 Presets: `--preset quick` (6 scenarios), `core` (8, covers all seven rubric
 dimensions), `full` (all 18).
 
+### Noise and network: the robustness ladder
+
+`--battery robustness` runs **one fixed script under 21 channel conditions**, so
+the only variable between rungs is the impairment and the finding is *where each
+system breaks*:
+
+| | |
+|---|---|
+| **Babble** 24 / 18 / 12 / 6 / 0 dB SNR | cafe, six talkers |
+| **Television** 18 / 12 / 6 dB SNR | one intelligible talker with pauses - worst case for an endpointer |
+| **Road / traffic / wind** 6 dB SNR | where a rideshare or delivery caller actually stands |
+| **G.726 16kbps · Opus 8kbps** | the codecs a bad PSTN and a starved VoIP leg really use |
+| **Packet loss** 5 / 15% concealed, 15% unconcealed | stutter versus holes - front-ends differ sharply |
+| **Jitter** 15 / 30% | buffer re-timing: frames duplicated and dropped |
+| **Dropouts · everything at once** | a lift, a tunnel; and a loud bar on a weak connection |
+
+Noise beds are **synthesized from a seed**, not sampled - no corpus to download,
+and a battery baked today re-bakes identically in a year, so a score change is a
+system change.
+
+```bash
+earshot bake <run-id>            # render + impair the harness's own audio
+earshot serve --run <run-id> &   # <Play> needs a URL, unlike inline <Say>
+```
+
+**The measurements survive the noise.** Once the caller's channel is full of
+babble no detector can pick the caller's turns back out of it - so every latency
+and barge-in number would collapse exactly when the test got interesting.
+Earshot sidesteps that: it *generated* the audio, so it knows every onset to the
+sample, and it locates the played file in the recording by correlating
+onset-emphasized energy envelopes, which survive what waveform correlation does
+not. Measured against ground truth: **0ms alignment error and 12ms latency error
+at -5dB SNR babble, through G.726, and under 20% packet loss.** Verify it
+yourself with `earshot selftest --impaired`.
+
+Baking also unlocks two metrics a clean run cannot produce: **response rate**
+(did it answer every turn) and **false triggers** (did it answer the *noise*).
+
 Everything lives in [`earshot/batteries/default.yaml`](earshot/batteries/default.yaml). Swap the
 lines for your own domain — but keep each scenario's *structure*, because the
 structure is what the metric measures.

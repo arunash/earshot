@@ -220,6 +220,73 @@ def label_mono(x: np.ndarray, sr: int, segs: Sequence[Segment],
     return out, sep
 
 
+def _envelope(x: np.ndarray, sr: int, env_hz: float = 100.0,
+              onset: bool = True) -> np.ndarray:
+    """Onset-emphasized energy envelope - what alignment correlates on.
+
+    A plain log-energy envelope fails under additive noise: at low SNR the floor
+    rises until log(speech+noise) is nearly log(noise) everywhere and the
+    contrast the correlation depends on is gone. Subtracting a running baseline
+    and keeping only the positive part leaves the ONSETS, which stay put no
+    matter how high the floor goes - the moments speech starts are still the
+    moments energy jumps.
+    """
+    hop = max(1, int(sr / env_hz))
+    n = len(x) // hop
+    if n < 2:
+        return np.zeros(0, np.float32)
+    e = np.sqrt((x[:n * hop].reshape(n, hop).astype(np.float64) ** 2).mean(axis=1))
+    e = np.log(np.maximum(e, 1e-8))
+    if not onset:
+        return e.astype(np.float32)
+    w = max(3, int(env_hz * 0.5))               # 500ms running baseline
+    pad = np.pad(e, (w // 2, w // 2), mode="edge")
+    base = np.convolve(pad, np.ones(w) / w, mode="valid")[:len(e)]
+    return np.maximum(e - base, 0.0).astype(np.float32)
+
+
+def locate_reference(ref: np.ndarray, signal: np.ndarray, sr: int,
+                     env_hz: float = 100.0) -> Tuple[float, float]:
+    """Find where a known clean rendering sits inside a recorded channel.
+
+    Correlates ENERGY ENVELOPES rather than waveforms. That is the whole trick:
+    a codec, 20% packet loss and a cafe at 0dB SNR destroy waveform similarity
+    but barely touch the coarse shape of where speech is and is not - so the
+    alignment holds at impairment levels where a sample-domain correlation has
+    long since failed.
+
+    Returns (offset_seconds, confidence) where confidence is the correlation
+    peak in standard deviations above the rest of the surface. Below about 4
+    the alignment should not be trusted.
+    """
+    a, b = _envelope(ref, sr, env_hz), _envelope(signal, sr, env_hz)
+    onset = True
+    if a.size and float(a.std()) < 1e-6:
+        onset = False
+        a, b = (_envelope(ref, sr, env_hz, onset=False),
+                _envelope(signal, sr, env_hz, onset=False))
+    if len(a) < 4 or len(b) < 4:
+        return 0.0, 0.0
+    if not onset:
+        # A plain log-energy envelope has a large DC term; remove it or the
+        # correlation is dominated by overlap length rather than by content.
+        a = a - a.mean()
+        b = b - b.mean()
+    # An onset envelope is already baseline-removed and non-negative. Centring
+    # it turns leading silence into a long negative block that pulls the peak
+    # off by however much silence the rendering starts with - which for a baked
+    # scenario is the whole greeting pause.
+    a = a / (a.std() or 1.0)
+    b = b / (b.std() or 1.0)
+    n = 1 << (len(a) + len(b)).bit_length()
+    corr = np.fft.irfft(np.fft.rfft(b, n) * np.conj(np.fft.rfft(a, n)), n)
+    search = corr[:max(1, len(b))]
+    k = int(np.argmax(search))
+    peak = float(search[k])
+    bg = float(search.std()) or 1e-9
+    return k / env_hz, peak / bg
+
+
 def detect_agent_channel(data: np.ndarray, sr: int, **kw) -> Tuple[int, float]:
     """Work out which channel of a dual recording is the agent under test.
 
@@ -295,6 +362,13 @@ class CallMetrics:
 
     agent_channel: Optional[int] = None
     agent_channel_margin_s: Optional[float] = None
+    caller_from_timeline: bool = False
+    alignment_offset_s: Optional[float] = None
+    alignment_confidence: Optional[float] = None
+    turns_offered: Optional[int] = None
+    turns_answered: Optional[int] = None
+    response_rate: Optional[float] = None
+    false_triggers: Optional[int] = None
 
     notes: List[str] = field(default_factory=list)
     segments: List[Segment] = field(default_factory=list)
@@ -312,8 +386,17 @@ class CallMetrics:
 
 def analyze(path: "str | Path", workdir: "str | Path",
             agent_channel: "int | str" = "auto", agent_first: bool = True,
+            reference: "str | Path | None" = None,
+            timeline: "Optional[List[Dict]]" = None,
             **kw) -> CallMetrics:
-    """Compute every objective metric for one call recording."""
+    """Compute every objective metric for one call recording.
+
+    When `reference` and `timeline` are supplied - which they are for any baked
+    scenario - the caller's turns come from ground truth rather than from a
+    voice-activity detector, after aligning the reference against the recording.
+    That is what keeps latency and barge-in measurable once the caller's channel
+    is full of babble.
+    """
     o = dict(DEFAULTS, **{k: v for k, v in kw.items() if k in DEFAULTS})
     sr, data, stereo = load_call(path, workdir)
     duration = data.shape[0] / sr
@@ -334,12 +417,40 @@ def analyze(path: "str | Path", workdir: "str | Path",
         ch_caller = 1 - ch_agent
         agent_segs = [Segment(s.start, s.end, AGENT)
                       for s in vad_segments(data[:, ch_agent], sr, **o)]
-        caller_segs = [Segment(s.start, s.end, CALLER)
-                       for s in vad_segments(data[:, ch_caller], sr, **o)]
+
+        if reference is not None and timeline:
+            # `reference` is the file that was actually PLAYED, impairment and
+            # all. Correlating the clean render instead fails at exactly the
+            # SNRs this machinery exists to support.
+            ref_sr, ref_data = read_wav(to_pcm_wav(
+                reference, Path(workdir) / (Path(reference).stem + ".ref16.wav"),
+                sample_rate=sr))
+            offset, align_conf = locate_reference(
+                ref_data.reshape(-1), data[:, ch_caller], sr)
+            caller_segs = [Segment(t["start"] + offset, t["end"] + offset, CALLER)
+                           for t in timeline]
+            notes.append(
+                f"Caller turns taken from the baked timeline, aligned at "
+                f"{offset:.2f}s (confidence {align_conf:.1f} sigma). Latency and "
+                f"barge-in are measured against ground truth, not a detector.")
+            if align_conf < 4.0:
+                notes.append(
+                    f"ALIGNMENT IS WEAK ({align_conf:.1f} sigma). The recording may "
+                    f"not contain this scenario's audio, or the impairment may be "
+                    f"past what alignment survives. Treat this call's numbers as "
+                    f"unreliable and re-run it.")
+            aligned = True
+        else:
+            caller_segs = [Segment(s.start, s.end, CALLER)
+                           for s in vad_segments(data[:, ch_caller], sr, **o)]
+            aligned = False
+
         segs = sorted(agent_segs + caller_segs, key=lambda s: s.start)
         confidence = None
         measurable = True
     else:
+        aligned = False
+        offset = align_conf = None
         mono = data.mean(axis=1)
         raw = vad_segments(mono, sr, **o)
         segs, confidence = label_mono(mono, sr, raw, agent_first=agent_first)
@@ -414,6 +525,34 @@ def analyze(path: "str | Path", workdir: "str | Path",
     caller_time = sum(s.dur for s in caller_segs)
     speech = agent_time + caller_time
 
+    # --- with a known timeline: did it answer, and did it answer the noise? ---
+    offered = answered = triggers = None
+    if aligned and caller_segs:
+        window = 8.0
+        offered = len(caller_segs)
+        answered = 0
+        answering = set()
+        for idx, c in enumerate(caller_segs):
+            nxt = caller_segs[idx + 1].start if idx + 1 < len(caller_segs) else 1e9
+            hit = next((a for a in agent_segs
+                        if c.end <= a.start < min(c.end + window, nxt)), None)
+            if hit is not None:
+                answered += 1
+                answering.add(id(hit))
+        # An agent turn that is neither a reply to anything nor an interruption
+        # of anything is the agent talking to the noise. The opening greeting -
+        # everything before the first caller turn - is excluded.
+        first = caller_segs[0].start
+        triggers = 0
+        for a in agent_segs:
+            if a.start <= first or id(a) in answering:
+                continue
+            if any(c.start <= a.start <= c.end for c in caller_segs):
+                continue
+            if any(c.end <= a.start <= c.end + window for c in caller_segs):
+                continue
+            triggers += 1
+
     stops = [b.stop_ms for b in barge]
     m = CallMetrics(
         source=str(path),
@@ -447,6 +586,13 @@ def analyze(path: "str | Path", workdir: "str | Path",
         longest_agent_turn_s=round(max((s.dur for s in agent_segs), default=0.0), 2),
         agent_channel=ch_agent if stereo else None,
         agent_channel_margin_s=None if margin is None else round(margin, 2),
+        turns_offered=offered,
+        turns_answered=answered,
+        response_rate=(round(answered / offered, 3) if offered else None),
+        false_triggers=triggers,
+        caller_from_timeline=bool(aligned),
+        alignment_offset_s=round(offset, 3) if aligned else None,
+        alignment_confidence=round(align_conf, 2) if aligned else None,
         notes=notes,
         segments=ordered,
     )
@@ -465,9 +611,15 @@ def aggregate(calls: Sequence[CallMetrics]) -> Dict:
     yields = [b.yielded for c in calls if c.barge_in_measurable for b in c.barge_ins]
     ratios = [c.agent_talk_ratio for c in calls if c.agent_talk_ratio is not None]
     turns = [c.mean_agent_turn_s for c in calls if c.mean_agent_turn_s is not None]
+    offered = sum(c.turns_offered or 0 for c in calls)
+    answered = sum(c.turns_answered or 0 for c in calls)
+    trig = [c.false_triggers for c in calls if c.false_triggers is not None]
     return {
         "calls": len(calls),
         "total_duration_s": round(sum(c.duration_s for c in calls), 1),
+        "response_rate": round(answered / offered, 3) if offered else None,
+        "turns_offered": offered or None,
+        "false_triggers": sum(trig) if trig else None,
         "latency": {
             "n": len(lat),
             "median_ms": _pct(lat, 50) and round(_pct(lat, 50), 1),

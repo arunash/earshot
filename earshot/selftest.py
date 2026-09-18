@@ -86,6 +86,109 @@ def _render(path: Path) -> None:
         w.writeframes((stereo * 32767).astype("<i2").tobytes())
 
 
+IMPAIRMENTS = [
+    ("clean", {}),
+    ("babble @ 6dB SNR", {"noise": "babble", "snr_db": 6}),
+    ("television @ 6dB SNR", {"noise": "tv", "snr_db": 6}),
+    ("road noise @ 0dB SNR", {"noise": "road", "snr_db": 0}),
+    ("g726 at 16kbps", {"codec": "g726:16000"}),
+    ("15% packet loss", {"packet_loss": 0.15}),
+    ("30% jitter", {"jitter": 0.30}),
+    ("babble 8dB + g726 + 8% loss",
+     {"noise": "babble", "snr_db": 8, "codec": "g726:16000", "packet_loss": 0.08}),
+]
+TRUE_OFFSET = 2.90
+TRUE_LATENCY_MS = 750.0
+
+
+def run_impaired(verbose: bool = True) -> bool:
+    """The claim this guards: once the caller's channel is full of babble, the
+    measurements still hold - because the harness baked the audio and therefore
+    knows the timeline, and because alignment correlates onset envelopes that
+    survive impairment a waveform correlation does not.
+
+    If this regresses, every noise and network number in every report is wrong.
+    """
+    import json
+    import numpy as np
+
+    from . import impair
+    from .audio import read_wav, analyze
+    from .bake import render_scenario
+    from .battery import load as load_battery
+
+    b = load_battery("robustness")
+    scenario = b.get("N00")
+    clean, timeline = render_scenario(scenario, sr=SR)
+
+    ok_all = True
+    if verbose:
+        print(bold("earshot selftest - measurement under impairment"))
+        print(dim(f"  true offset {TRUE_OFFSET}s, true latency "
+                  f"{TRUE_LATENCY_MS:.0f}ms, {len(timeline)} turns offered"))
+        print()
+
+    with tempfile.TemporaryDirectory() as td:
+        for label, cond in IMPAIRMENTS:
+            played = impair.apply_condition(clean, SR, cond, seed=7) if cond else clean
+            ref = Path(td) / "played.wav"
+            _write_mono(ref, played)
+
+            n = int((TRUE_OFFSET + len(played) / SR + 8) * SR)
+            caller = np.zeros(n, np.float32)
+            i = int(TRUE_OFFSET * SR)
+            caller[i:i + len(played)] += played[:n - i]
+
+            at = [0.4] + [t["end"] + TRUE_OFFSET + TRUE_LATENCY_MS / 1000.0
+                          for t in timeline]
+            agent = np.zeros(n, np.float32)
+            rng = np.random.default_rng(3)
+            for st in at:
+                x = _voice(2.0, 125, int(st * 100))
+                j = int(st * SR)
+                agent[j:j + len(x)] += x
+            noise = rng.normal(0, 0.002, n).astype(np.float32)
+            stereo = np.clip(np.stack([agent + noise, caller + noise], axis=1), -1, 1)
+            rec = Path(td) / "rec.wav"
+            with wave.open(str(rec), "wb") as w:
+                w.setnchannels(2)
+                w.setsampwidth(2)
+                w.setframerate(SR)
+                w.writeframes((stereo * 32767).astype("<i2").tobytes())
+
+            m = analyze(rec, td, agent_channel=0, reference=ref, timeline=timeline)
+            lat = (float(np.median(m.response_latency_ms))
+                   if m.response_latency_ms else None)
+            ok = (m.alignment_offset_s is not None
+                  and abs(m.alignment_offset_s - TRUE_OFFSET) <= 0.05
+                  and (m.alignment_confidence or 0) >= 4.0
+                  and m.turns_answered == len(timeline)
+                  and lat is not None and abs(lat - TRUE_LATENCY_MS) <= 80
+                  and (m.false_triggers or 0) == 0)
+            ok_all &= ok
+            if verbose:
+                mark = green("PASS") if ok else red("FAIL")
+                print(f"  {mark}  {label:<30} align {m.alignment_offset_s:>5.2f}s"
+                      f" @ {m.alignment_confidence:>4.1f}\u03c3   "
+                      f"answered {m.turns_answered}/{m.turns_offered}   "
+                      f"latency {lat:>6,.0f}ms" if lat else f"  {mark}  {label}")
+    if verbose:
+        print()
+        print(green("measurement survives impairment") if ok_all
+              else red("IMPAIRED MEASUREMENT IS BROKEN - noise and network "
+                       "numbers cannot be trusted"))
+    return ok_all
+
+
+def _write_mono(path: Path, x) -> None:
+    import numpy as np
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(SR)
+        w.writeframes((np.clip(x, -1, 1) * 32767).astype("<i2").tobytes())
+
+
 def run(verbose: bool = True) -> bool:
     with tempfile.TemporaryDirectory() as td:
         wav = Path(td) / "selftest.wav"

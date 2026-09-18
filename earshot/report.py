@@ -107,6 +107,28 @@ def markdown(result: Dict[str, Any], measured: Dict[str, Any],
          else f"{m['longest_dead_air_s']:.1f} s")
     L.append("")
 
+    by_scn = manifest.get("_by_scenario") or {}
+    if by_scn:
+        baked = any(v.get("baked") for v in by_scn.values())
+        L.append("## Scenario matrix")
+        L.append("")
+        L.append("| Scenario | " + ("Condition | " if baked else "")
+                 + " | ".join(ids) + " |")
+        L.append("|---|" + ("---|" if baked else "") + "---|" * len(ids))
+        for sid, sc in by_scn.items():
+            row = f"| **{sid}** {sc.get('name', '')} |"
+            if baked:
+                row += f" `{sc.get('condition')}` |"
+            for i in ids:
+                cell = (sc.get("systems") or {}).get(i)
+                if not cell:
+                    row += " — |"
+                    continue
+                flag = {"good": "", "warn": "⚠ ", "crit": "✕ "}[_health(cell) or "good"]
+                row += " " + flag + "<br>".join(_cell_text(cell)) + " |"
+            L.append(row)
+        L.append("")
+
     # --- per system --------------------------------------------------------
     for s in systems:
         sid = s["id"]
@@ -181,6 +203,23 @@ def markdown(result: Dict[str, Any], measured: Dict[str, Any],
             L.append(f"| {g.get('system')} | {g.get('guess', '')} "
                      f"| {g.get('confidence', '')} | {g.get('reasoning', '')} |")
         L.append("")
+
+    if by_scn:
+        L.append("## The script")
+        L.append("")
+        L.append("Every line the harness spoke, verbatim, identical for each "
+                 "system.")
+        L.append("")
+        for sid, sc in by_scn.items():
+            L.append(f"**{sid} — {sc.get('name')}**"
+                     + (f"  ·  `{sc['condition']}`"
+                        if sc.get("condition") and sc["condition"] != "clean" else ""))
+            L.append("")
+            for t in sc.get("script", []):
+                when = f"`{t['start']:.1f}s` " if t.get("start") is not None else ""
+                mark = " *(interrupts the agent)*" if t.get("barge_in") else ""
+                L.append(f"- {when}\u201c{t.get('text')}\u201d{mark}")
+            L.append("")
 
     meta = result.get("_meta", {})
     L.append("---")
@@ -346,6 +385,39 @@ td.sev.critical{color:var(--crit);border-left-color:var(--crit);font-weight:600}
 td.sev.major{color:var(--warn);border-left-color:var(--warn)}
 td.sev.minor{color:var(--mut);border-left-color:var(--line)}
 
+table.matrix td{vertical-align:middle}
+table.matrix td.cond{font-family:"IBM Plex Mono",monospace;font-size:.72rem;color:var(--mut);white-space:nowrap}
+td.m{font-family:"IBM Plex Mono",monospace;font-size:.72rem;text-align:right;
+     white-space:nowrap;position:relative;padding-right:1.5rem}
+td.m span{display:block;line-height:1.45}
+td.m span:first-of-type{color:var(--ink);font-size:.78rem}
+td.m span:not(:first-of-type){color:var(--mut)}
+td.m .dot{position:absolute;right:.55rem;top:50%;margin-top:-3px;
+          width:6px;height:6px;border-radius:50%;background:var(--track);padding:0}
+td.m.good .dot{background:var(--good)}
+td.m.warn .dot{background:var(--warn)}
+td.m.crit .dot{background:var(--crit)}
+td.m.crit span:first-of-type{color:var(--crit);font-weight:600}
+.matkey{display:flex;align-items:center;gap:.4rem;font-size:.72rem;color:var(--mut);
+        font-family:"IBM Plex Mono",monospace;margin:.6rem 0 0}
+.matkey .swatch{width:7px;height:7px;border-radius:50%;display:inline-block;margin-left:1rem}
+.matkey .swatch:first-child{margin-left:0}
+.swatch.good{background:var(--good)} .swatch.warn{background:var(--warn)}
+.swatch.crit{background:var(--crit)}
+
+.scripts{display:grid;gap:1rem}
+.script{background:var(--surface);border:1px solid var(--line);padding:1.1rem 1.3rem}
+.script h3{margin:0 0 .3rem;font-size:.95rem}
+.cond-line{font-family:"IBM Plex Mono",monospace;font-size:.72rem;color:var(--accent);margin:.2rem 0 .5rem}
+.intent{font-size:.85rem;color:var(--mut);margin:.2rem 0 .7rem}
+ol.lines{list-style:none;margin:0;padding:0;counter-reset:l}
+ol.lines li{display:grid;grid-template-columns:3.2rem 1fr auto;gap:.7rem;
+            align-items:baseline;padding:.4rem 0;border-top:1px solid var(--line);max-width:none}
+ol.lines li:first-child{border-top:none}
+.at{font-family:"IBM Plex Mono",monospace;font-size:.7rem;color:var(--faint);text-align:right}
+.said{font-size:.92rem}
+.mark{font-family:"IBM Plex Mono",monospace;font-size:.65rem;color:var(--accent);
+      text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
 .note{background:var(--accent-soft);border:1px solid var(--line);padding:1rem 1.2rem;
       font-size:.9rem;margin:1rem 0}
 .note b{font-family:"IBM Plex Sans Condensed",sans-serif}
@@ -424,6 +496,116 @@ def _latency_scale(measured: Dict[str, Any], ids: List[str]) -> str:
              "are <b>p90</b> and <b>worst</b>. How far those ticks sit from the "
              "bar is the jitter &mdash; and jitter is what callers actually "
              "notice.</p>")
+    P.append("</div>")
+    return "".join(P)
+
+
+
+
+def _health(cell: Dict[str, Any]) -> str:
+    """good / warn / crit for one scenario-system cell.
+
+    Response rate leads when it exists, because a turn that went unanswered is a
+    failure no latency number can offset. Without it, latency carries the cell
+    against the same 800ms / 1.5s thresholds the scale uses.
+    """
+    rr = cell.get("response_rate")
+    if rr is not None:
+        if rr < 0.75:
+            return "crit"
+        if rr < 0.95 or (cell.get("false_triggers") or 0) > 0:
+            return "warn"
+        return "good" if not (cell.get("repeat_requests") or 0) else "warn"
+    lat = cell.get("latency_median_ms")
+    if lat is None:
+        return ""
+    if lat > 1500:
+        return "crit"
+    if lat > 800 or (cell.get("repeat_requests") or 0):
+        return "warn"
+    return "good"
+
+
+def _cell_text(cell: Dict[str, Any]) -> List[str]:
+    """The two or three numbers worth showing in a matrix cell."""
+    out = []
+    rr = cell.get("response_rate")
+    if rr is not None:
+        out.append(f"{rr * 100:.0f}% answered")
+    lat = cell.get("latency_median_ms")
+    if lat is not None:
+        out.append(f"{lat:,.0f} ms")
+    if cell.get("false_triggers"):
+        out.append(f"{cell['false_triggers']} false trigger"
+                   + ("s" if cell["false_triggers"] != 1 else ""))
+    if cell.get("repeat_requests"):
+        out.append(f"{cell['repeat_requests']} repeat"
+                   + ("s" if cell["repeat_requests"] != 1 else ""))
+    return out or ["no data"]
+
+
+def _matrix_html(by_scenario: Dict[str, Any], ids: List[str]) -> str:
+    if not by_scenario:
+        return ""
+    baked = any(v.get("baked") for v in by_scenario.values())
+    P = ["<div class=scroll><table class=matrix><thead><tr>",
+         "<th>Scenario</th>", "<th>Condition</th>" if baked else "<th>Tests</th>"]
+    for i in ids:
+        P.append(f"<th class=n>{_esc(i)}</th>")
+    P.append("</tr></thead><tbody>")
+    for sid, sc in by_scenario.items():
+        P.append(f"<tr><td><b>{_esc(sid)}</b> {_esc(sc.get('name'))}</td>"
+                 f"<td class=cond>{_esc(sc.get('condition') if baked else ', '.join(sc.get('dimensions', [])) or sc.get('condition'))}</td>")
+        for i in ids:
+            cell = (sc.get("systems") or {}).get(i)
+            if not cell:
+                P.append("<td class='m'>&mdash;</td>")
+                continue
+            h = _health(cell)
+            lines = _cell_text(cell)
+            P.append(f"<td class='m {h}'><span class=dot></span>"
+                     + "".join(f"<span>{_esc(x)}</span>" for x in lines) + "</td>")
+        P.append("</tr>")
+    P.append("</tbody></table></div>")
+    P.append("<p class=matkey><span class='swatch good'></span>holding"
+             "<span class='swatch warn'></span>degrading"
+             "<span class='swatch crit'></span>failing</p>")
+    return "".join(P)
+
+
+def _script_html(by_scenario: Dict[str, Any]) -> str:
+    """Exactly what the harness said, verbatim, with timings where baked.
+
+    A benchmark that does not publish its script is not reproducible, and a
+    reader cannot judge whether a low score means the system is bad or the
+    question was unfair.
+    """
+    if not by_scenario:
+        return ""
+    P = ["<div class=scripts>"]
+    for sid, sc in by_scenario.items():
+        P.append(f"<div class=script><h3>{_esc(sid)} &middot; "
+                 f"{_esc(sc.get('name'))}</h3>")
+        if sc.get("condition") and sc["condition"] != "clean":
+            P.append(f"<p class=cond-line>Channel condition: "
+                     f"<b>{_esc(sc['condition'])}</b></p>")
+        if sc.get("intent"):
+            P.append(f"<p class=intent>{_esc(sc['intent'])}</p>")
+        P.append("<ol class=lines>")
+        for t in sc.get("script", []):
+            marks = []
+            if t.get("barge_in"):
+                marks.append("interrupts the agent")
+            if t.get("wait") == "fixed" and t.get("offset_ms"):
+                marks.append(f"after {t['offset_ms'] / 1000:.1f}s of silence")
+            if t.get("voice") and t["voice"] != "default":
+                marks.append(t["voice"].replace("_", " "))
+            when = (f"<span class=at>{t['start']:.1f}s</span>"
+                    if t.get("start") is not None else "")
+            tag = (f"<span class=mark>{_esc(' · '.join(marks))}</span>"
+                   if marks else "")
+            P.append(f"<li>{when}<span class=said>{_esc(t.get('text'))}</span>{tag}</li>")
+        P.append("</ol></div>")
     P.append("</div>")
     return "".join(P)
 
@@ -523,6 +705,13 @@ def html_report(result: Dict[str, Any], measured: Dict[str, Any],
           + "</tr>")
     A("</tbody></table></div>")
 
+    by_scn = manifest.get("_by_scenario") or {}
+    if by_scn:
+        A("<h2>Scenario matrix</h2>")
+        A("<p>One row per scenario, so you can see <em>where</em> a system "
+          "breaks rather than only that its average slipped.</p>")
+        A(_matrix_html(by_scn, ids))
+
     for s in systems:
         sid = s["id"]
         dep = s.get("deployability", {})
@@ -590,6 +779,13 @@ def html_report(result: Dict[str, Any], measured: Dict[str, Any],
               f"<td>{_esc(g.get('confidence'))}</td>"
               f"<td>{_esc(g.get('reasoning'))}</td></tr>")
         A("</tbody></table></div>")
+
+    if by_scn:
+        A("<h2>The script</h2>")
+        A("<p>Every line the harness spoke, verbatim, identical for each system. "
+          "A benchmark that does not publish its script cannot be reproduced, "
+          "and you cannot tell a bad system from an unfair question.</p>")
+        A(_script_html(by_scn))
 
     meta = result.get("_meta", {})
     A(f"<footer>Scored by <code>{_esc(meta.get('model'))}</code> at effort "
