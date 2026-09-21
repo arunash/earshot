@@ -53,16 +53,18 @@ def _multipart(fields: Dict[str, str], filename: str, content: bytes,
     return bytes(out), f"multipart/form-data; boundary={boundary}"
 
 
-def _upload_version(service_sid: str, asset_sid: str, path: Path) -> str:
+def _upload_version(service_sid: str, asset_sid: str, path: Path,
+                    remote_name: Optional[str] = None) -> str:
     """POST the file bytes to the upload host; returns the AssetVersion SID."""
     import base64
     import json
 
     sid, tok = _creds()
     ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    name = remote_name or path.name
     body, content_type = _multipart(
-        {"Path": f"/{path.name}", "Visibility": "public"},
-        path.name, path.read_bytes(), ctype)
+        {"Path": f"/{name}", "Visibility": "public"},
+        name, path.read_bytes(), ctype)
     url = f"{UPLOAD_HOST}/Services/{service_sid}/Assets/{asset_sid}/Versions"
     req = urllib.request.Request(url, data=body, method="POST")
     req.add_header("Content-Type", content_type)
@@ -72,12 +74,25 @@ def _upload_version(service_sid: str, asset_sid: str, path: Path) -> str:
         return json.loads(r.read())["sid"]
 
 
+def content_name(path: Path) -> str:
+    """`N00.wav` -> `N00-3f9a1c22.wav`, keyed to the bytes.
+
+    Re-publishing the same path is not safe: Twilio's CDN served a cached copy
+    of a previous bake for minutes afterwards, and a run placed in that window
+    plays the wrong script while every check passes. A content-addressed name
+    means new audio is always a new URL, so there is no cache to be stale.
+    """
+    import hashlib
+    h = hashlib.sha1(path.read_bytes()).hexdigest()[:8]
+    return f"{path.stem}-{h}{path.suffix}"
+
+
 def publish(files: List[Path], environment: str = "earshot",
             verbose: bool = True) -> Dict[str, str]:
-    """Upload, build and deploy. Returns {filename: public url}.
+    """Upload, build and deploy. Returns {local filename: public url}.
 
-    Re-running reuses the service and replaces the assets, so re-baking and
-    re-publishing does not accumulate services in the account.
+    Re-running reuses the service, so re-baking does not accumulate services.
+    Asset paths are content-addressed - see content_name.
     """
     try:
         from twilio.rest import Client
@@ -99,11 +114,14 @@ def publish(files: List[Path], environment: str = "earshot",
 
     existing = {a.friendly_name: a for a in service.assets.list(limit=100)}
     versions: List[str] = []
+    names: Dict[str, str] = {}
     for i, f in enumerate(files, 1):
-        asset = existing.get(f.name) or service.assets.create(friendly_name=f.name)
-        versions.append(_upload_version(svc.sid, asset.sid, f))
+        remote = content_name(f)
+        names[f.name] = remote
+        asset = existing.get(remote) or service.assets.create(friendly_name=remote)
+        versions.append(_upload_version(svc.sid, asset.sid, f, remote))
         if verbose:
-            info(f"[{i}/{len(files)}] uploaded {f.name}")
+            info(f"[{i}/{len(files)}] uploaded {remote}")
 
     build = service.builds.create(asset_versions=versions)
     if verbose:
@@ -129,14 +147,23 @@ def publish(files: List[Path], environment: str = "earshot",
 
     # The CDN needs a moment after a deployment before the first fetch works.
     time.sleep(5)
-    return {f.name: f"https://{env.domain_name}/{f.name}" for f in files}
+    return {f.name: f"https://{env.domain_name}/{names[f.name]}" for f in files}
 
 
-def verify(url: str, timeout: float = 20.0) -> int:
-    """HTTP status for a published asset. Confirm before spending a run on it."""
+def verify(url: str, expect_bytes: Optional[int] = None,
+           timeout: float = 30.0) -> int:
+    """HTTP status for a published asset, and optionally that it is the RIGHT one.
+
+    Status alone is not enough. A stale cached copy returns 200 while serving a
+    previous bake, which is how a run silently plays the wrong script. Pass the
+    local file's size and a mismatch is reported as 409 rather than 200.
+    """
     try:
         req = urllib.request.Request(url, method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = r.read()
+            if expect_bytes is not None and len(body) != expect_bytes:
+                return 409
             return r.status
     except urllib.error.HTTPError as e:
         return e.code

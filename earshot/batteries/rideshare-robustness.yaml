@@ -9,27 +9,27 @@
 # a phone are also the classic confusion set - five/nine, two/oh, four/oh - so a
 # PIN read back wrongly is unambiguous evidence, not a judgement call.
 #
-# THE SCRIPT IS SHAPED BY A HARD CONSTRAINT, measured rather than assumed:
-# without a valid PIN these agents terminate the call at a fixed ~18.6 seconds
-# from answer (observed twice, to within 20ms). The agent's own prompt runs to
-# about 7.1s, which leaves roughly eleven usable seconds - so a four-turn script
-# gets one turn out and then listens to a dial tone.
+# THE PIN IS THE GATE. These agents derive a guest-booking PIN from the calling
+# number's last four digits, and until it verifies they terminate the call at a
+# fixed ~18.6 seconds - which caps the script to two turns and leaves too little
+# audio for alignment to lock onto. {from_last4} resolves from TWILIO_FROM_NUMBER
+# so the battery is correct from whatever line you dial.
 #
-# Two turns therefore, both front-loaded and both digits, landing near 8s and
-# 11s. Digit capture is the highest-value thing to probe under noise anyway -
-# four/five/nine are the classic telephone confusion set - and measuring it
-# twice per call gives the ladder two samples per rung instead of one.
+# Four turns: the PIN, a pickup, a drop-off, then a spelled correction plus a
+# read-back demand. A real route (1455 Market St, San Francisco -> 200 Mathilda
+# Ave, Sunnyvale) is a far better probe than digits alone - street names are
+# out-of-vocabulary in a way four digits never are, and "Mathilda" spelled aloud
+# under babble is the single hardest thing in this battery.
 #
-# GIVE THE HARNESS A VALID PIN and this constraint disappears: verification
-# succeeds, the booking flow continues, and the four-turn script in git history
-# becomes usable again - addresses, names and times all become measurable.
+# Two street numbers and a PIN give three independent digit captures per call,
+# so a rung that half-fails is visible rather than binary.
 
 id: rideshare-robustness
 name: Earshot Robustness Ladder (rideshare)
 version: 1
 runs_per_scenario: 1
-default_gap_ms: 0
-expect_echo: "4729"
+default_gap_ms: 300
+expect_echo: "{from_last4}"
 
 context: |
   You are calling a rideshare guest-booking line. Every scenario below runs the
@@ -42,11 +42,13 @@ context: |
 
 # The shared script, referenced by every scenario via YAML anchors.
 _script: &script
-  - { wait: after_agent, say: "My pin is four seven two nine.", gap_ms: 0 }
-  - { wait: after_agent, say: "Sorry, was that four seven two nine?", gap_ms: 0 }
+  - { wait: after_agent, say: "My pin is {from_last4_spoken}." }
+  - { wait: after_agent, say: "I need a pickup at 1455 Market Street in San Francisco." }
+  - { wait: after_agent, say: "Going to 200 Mathilda Avenue in Sunnyvale." }
+  - { wait: after_agent, say: "Sorry, Mathilda with an H. M A T H I L D A. Can you read both addresses back to me?" }
 
-_pass: &pass ["responds to both turns", "echoes the digits it heard"]
-_fail: &fail ["asks for a repeat", "stops responding", "responds to the noise itself", "reads a wrong digit back"]
+_pass: &pass ["responds to every turn", "echoes the pin and both street numbers"]
+_fail: &fail ["asks for a repeat", "stops responding", "responds to the noise itself", "reads a wrong digit or street back"]
 
 scenarios:
 

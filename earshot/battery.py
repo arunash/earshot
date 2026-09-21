@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import random
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -131,6 +133,16 @@ class Battery:
         return plan
 
 
+def _interp_turn(d: Any, vals: Dict[str, str]) -> Any:
+    if isinstance(d, str):
+        return _interp(d, vals)
+    out = dict(d)
+    for k in ("say", "play"):
+        if k in out:
+            out[k] = _interp(out[k], vals)
+    return out
+
+
 def _turn(d: Any, default_gap: int) -> Turn:
     if isinstance(d, str):
         return Turn(say=d)
@@ -149,6 +161,34 @@ def _turn(d: Any, default_gap: int) -> Turn:
     return t
 
 
+def _placeholders() -> Dict[str, str]:
+    """Values a battery can interpolate into its script.
+
+    `from_last4` exists because some lines derive a caller's PIN from their
+    number. Writing the digits into the YAML would silently produce an invalid
+    PIN for anyone whose Twilio number differs - and an invalid PIN, on the
+    agents this was built against, means the call is cut off before most of the
+    script plays.
+    """
+    num = re.sub(r"\D", "", os.environ.get("TWILIO_FROM_NUMBER", ""))
+    last4 = num[-4:] if len(num) >= 4 else ""
+    # EARSHOT_PIN overrides the derivation outright, for a line whose PIN comes
+    # from somewhere else - or for finding out where it comes from.
+    return {"from_last4": os.environ.get("EARSHOT_PIN") or last4}
+
+
+def _interp(text: Optional[str], values: Dict[str, str]) -> Optional[str]:
+    if not text:
+        return text
+    for k, v in values.items():
+        text = text.replace("{" + k + "}", v)
+    return text
+
+
+SPOKEN = {"0": "zero", "1": "one", "2": "two", "3": "three", "4": "four",
+          "5": "five", "6": "six", "7": "seven", "8": "eight", "9": "nine"}
+
+
 def load(path_or_id: str = "default") -> Battery:
     p = Path(path_or_id)
     if not p.exists():
@@ -159,6 +199,10 @@ def load(path_or_id: str = "default") -> Battery:
         raw = yaml.safe_load(fh)
 
     gap = int(raw.get("default_gap_ms", 300))
+    vals = _placeholders()
+    # A spoken form too, so TTS says "eight four seven eight" rather than
+    # "eight thousand four hundred and seventy-eight".
+    vals["from_last4_spoken"] = " ".join(SPOKEN.get(c, c) for c in vals["from_last4"])
     scenarios = []
     for s in raw.get("scenarios", []):
         scenarios.append(Scenario(
@@ -169,7 +213,7 @@ def load(path_or_id: str = "default") -> Battery:
             setup=s.get("setup", {}) or {},
             barge_expectation=s.get("barge_expectation", "none"),
             condition=s.get("condition", {}) or {},
-            turns=[_turn(t, gap) for t in s.get("turns", [])],
+            turns=[_turn(_interp_turn(t, vals), gap) for t in s.get("turns", [])],
             tester_script=(s.get("tester_script") or "").strip(),
             pass_signals=s.get("pass_signals", []) or [],
             fail_signals=s.get("fail_signals", []) or [],
@@ -184,5 +228,6 @@ def load(path_or_id: str = "default") -> Battery:
         default_gap_ms=gap,
         context=(raw.get("context") or "").strip(),
         scenarios=scenarios,
-        expect_echo=(str(raw["expect_echo"]) if raw.get("expect_echo") else None),
+        expect_echo=(_interp(str(raw["expect_echo"]), vals)
+                     if raw.get("expect_echo") else None),
     )

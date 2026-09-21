@@ -278,9 +278,10 @@ def cmd_bake(a) -> int:
         from .assets import publish as publish_assets, verify
         files = [out / f"{sid}.wav" for sid in sorted(baked)]
         urls = publish_assets(files)
-        bad = [n for n, u in urls.items() if verify(u) != 200]
+        sizes = {f.name: f.stat().st_size for f in files}
+        bad = [n for n, u in urls.items() if verify(u, sizes.get(n)) != 200]
         if bad:
-            die(f"published but not reachable: {', '.join(bad)}. "
+            die(f"published but not serving the current audio: {', '.join(bad)}. "
                 f"Do not start a run against these.")
         m["audio_urls"] = urls
         info(f"all {len(urls)} asset(s) verified reachable")
@@ -399,7 +400,13 @@ def cmd_ingest(a) -> int:
         mpath = rd / "metrics" / f"{stem}.json"
         tpath = rd / "transcripts" / f"{stem}.json"
 
-        if mpath.exists() and not a.force:
+        # A cache is only valid while it is older than nothing that feeds it.
+        # Re-calling a scenario rewrites the recording, and a cache that ignores
+        # that silently reports the previous call's numbers - which is worse
+        # than having no cache at all.
+        fresh = (mpath.exists()
+                 and mpath.stat().st_mtime >= Path(rec["path"]).stat().st_mtime)
+        if fresh and not a.force:
             cm_dict = read_json(mpath)
             info(f"[{i}/{len(found)}] {stem} cached")
         else:
@@ -415,7 +422,9 @@ def cmd_ingest(a) -> int:
             cm_dict = cm.to_dict(include_segments=True)
             write_json(mpath, cm_dict)
 
-        if not (tpath.exists() and not a.force) and engine:
+        t_fresh = (tpath.exists()
+                   and tpath.stat().st_mtime >= Path(rec["path"]).stat().st_mtime)
+        if not (t_fresh and not a.force) and engine:
             info(f"[{i}/{len(found)}] transcribing {stem}")
             segs = None
             if not cm_dict.get("stereo"):
