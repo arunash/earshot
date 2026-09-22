@@ -412,7 +412,30 @@ def analyze(path: "str | Path", workdir: "str | Path",
     margin = None
 
     if stereo:
-        if agent_channel == "auto":
+        if reference is not None and agent_channel == "auto":
+            # With a known reference there is no need to guess. Correlate it
+            # against BOTH channels; the one it matches is ours, and the other
+            # is the agent. This matters because the speaks-first heuristic
+            # below is defeated by exactly the conditions this tool exists to
+            # test: a channel carrying continuous babble has energy from t=0,
+            # so the noisy CALLER leg looks like the party that answered.
+            _sr, _ref = read_wav(to_pcm_wav(
+                reference, Path(workdir) / (Path(reference).stem + ".probe.wav"),
+                sample_rate=sr))
+            _ref = _ref.reshape(-1)
+            scores = [locate_reference(_ref, data[:, ch], sr)
+                      for ch in range(data.shape[1])]
+            ch_caller = max(range(len(scores)), key=lambda i: scores[i][1])
+            ch_agent = 1 - ch_caller
+            margin = scores[ch_caller][1] - scores[ch_agent][1]
+            if margin < 0.5:
+                notes.append(
+                    f"Channel assignment is ambiguous: the reference matches "
+                    f"both legs about equally ({scores[0][1]:.1f} vs "
+                    f"{scores[1][1]:.1f} sigma). Heavy crosstalk is the usual "
+                    f"cause. Force it with --agent-channel if the transcript "
+                    f"looks swapped.")
+        elif agent_channel == "auto":
             ch_agent, margin = detect_agent_channel(data, sr, **o)
             if margin < 0.75:
                 notes.append(

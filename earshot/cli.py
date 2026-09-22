@@ -187,6 +187,14 @@ def cmd_new(a) -> int:
     plan = b.plan([s["id"] for s in systems], only=only, skip=skip,
                   runs=runs, shuffle=not a.no_shuffle, seed=a.seed)
 
+    if not plan:
+        ids = ", ".join(sc.id for sc in b.scenarios)
+        die(f"that selection matches no scenario in battery {b.id!r}, so the run "
+            f"would place no calls.\n"
+            f"   preset {a.preset!r} selects {PRESETS.get(a.preset) or 'everything'}\n"
+            f"   this battery has: {ids}\n"
+            f"   try --preset full, or --only <ids>")
+
     run_id = a.name or f"{_slug(b.id)}-{datetime.now().strftime('%Y%m%d-%H%M')}"
     rd = _runs_root() / run_id
     if rd.exists() and not a.force:

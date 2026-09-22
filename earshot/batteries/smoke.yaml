@@ -1,0 +1,41 @@
+# Earshot Smoke Test
+#
+# One call, one turn: does this line get past the agent's gate at all?
+#
+# Run it before a ladder. A battery costs 40 minutes and dozens of calls, and
+# every rung is worthless if the very first thing the agent does is refuse the
+# caller - which is exactly what happened on the first full run here.
+#
+# Deliberately contains NO bookable content: no addresses, no destination, no
+# times. It establishes whether the gate opens, and nothing downstream of the
+# gate can fire while it is the only thing on the wire.
+
+id: smoke
+name: Earshot Smoke Test
+version: 1
+runs_per_scenario: 1
+default_gap_ms: 300
+expect_echo: "{from_last4}"
+
+context: |
+  A single authentication turn against a guest-booking line. The only question
+  is whether the caller is accepted; nothing is requested.
+
+scenarios:
+  - id: S00
+    name: Gate check
+    intent: >
+      Confirm the line is accepted before spending a battery on it. Measures
+      nothing except whether the agent lets the caller proceed.
+    dimensions: [asr, task]
+    setup: { channel: handset, noise: none }
+    barge_expectation: none
+    turns:
+      - { wait: after_agent, say: "My pin is {from_last4_spoken}." }
+      - { wait: after_agent, say: "Thanks. Can you confirm you have me?" }
+    tester_script: |
+      Listen for one thing: does it accept the caller, or does it refuse the
+      number. Everything else is noise on this scenario.
+    pass_signals: ["accepts the pin", "proceeds past verification"]
+    fail_signals: ["cannot verify this phone", "cannot retrieve your information",
+                   "hangs up before the second turn"]

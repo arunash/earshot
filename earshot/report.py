@@ -107,6 +107,32 @@ def markdown(result: Dict[str, Any], measured: Dict[str, Any],
          else f"{m['longest_dead_air_s']:.1f} s")
     L.append("")
 
+    inp = manifest.get("_inputs") or {}
+    if inp:
+        L.append("## Inputs")
+        L.append("")
+        L.append("| | |")
+        L.append("|---|---|")
+        for label, value, note in inp.get("facts", []):
+            L.append(f"| **{label}** | {value}"
+                     + (f" <br><sub>{note}</sub>" if note else "") + " |")
+        L.append("")
+        if inp.get("script"):
+            L.append("**Spoken on every call** (identical audio, replayed):")
+            L.append("")
+            for t in inp["script"]:
+                when = f"`{t['start']:.1f}s` " if t.get("start") is not None else ""
+                L.append(f"- {when}\u201c{t.get('text')}\u201d")
+            L.append("")
+        if inp.get("conditions"):
+            L.append("**Channel conditions**")
+            L.append("")
+            L.append("| Rung | Impairment | Represents |")
+            L.append("|---|---|---|")
+            for rung, cond, why in inp["conditions"]:
+                L.append(f"| `{rung}` | {cond} | {why} |")
+            L.append("")
+
     by_scn = manifest.get("_by_scenario") or {}
     if by_scn:
         baked = any(v.get("baked") for v in by_scn.values())
@@ -405,6 +431,16 @@ td.m.crit span:first-of-type{color:var(--crit);font-weight:600}
 .swatch.good{background:var(--good)} .swatch.warn{background:var(--warn)}
 .swatch.crit{background:var(--crit)}
 
+.inputs{background:var(--surface);border:1px solid var(--line);padding:1.4rem 1.5rem}
+.inputgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));
+           gap:.9rem 1.4rem;margin-bottom:.4rem}
+.fact{display:flex;flex-direction:column;gap:.1rem;padding-bottom:.6rem;
+      border-bottom:1px solid var(--line)}
+.fact .k{font-family:"IBM Plex Mono",monospace;font-size:.63rem;letter-spacing:.1em;
+         text-transform:uppercase;color:var(--mut)}
+.fact .v{font-family:"IBM Plex Mono",monospace;font-size:.92rem;color:var(--ink)}
+.fact .n{font-size:.72rem;color:var(--faint)}
+td.mono{font-family:"IBM Plex Mono",monospace;font-size:.78rem;white-space:nowrap}
 .scripts{display:grid;gap:1rem}
 .script{background:var(--surface);border:1px solid var(--line);padding:1.1rem 1.3rem}
 .script h3{margin:0 0 .3rem;font-size:.95rem}
@@ -555,6 +591,52 @@ def _cell_text(cell: Dict[str, Any]) -> List[str]:
     return out or ["no data"]
 
 
+def _inputs_html(inputs: Dict[str, Any]) -> str:
+    """Everything that went in, labelled.
+
+    A benchmark is only worth the inputs it declares. Someone reading a number
+    here should be able to see the line it was dialled from, the identity it
+    authenticated with, the words that were spoken and when, and the exact
+    channel damage applied - without opening the repo.
+    """
+    if not inputs:
+        return ""
+    P = ["<div class=inputs>"]
+
+    P.append("<div class=inputgrid>")
+    for label, value, note in inputs.get("facts", []):
+        P.append(f"<div class=fact><span class=k>{_esc(label)}</span>"
+                 f"<span class=v>{_esc(value)}</span>"
+                 + (f"<span class=n>{_esc(note)}</span>" if note else "")
+                 + "</div>")
+    P.append("</div>")
+
+    if inputs.get("script"):
+        P.append("<h3>What the harness said, on every call</h3>")
+        P.append("<ol class=lines>")
+        for t in inputs["script"]:
+            when = (f"<span class=at>{t['start']:.1f}s</span>"
+                    if t.get("start") is not None else "<span class=at></span>")
+            P.append(f"<li>{when}<span class=said>{_esc(t.get('text'))}</span>"
+                     f"<span class=mark></span></li>")
+        P.append("</ol>")
+        P.append(f"<p class=intent>Identical audio on all "
+                 f"{_esc(inputs.get('n_calls', '?'))} calls, rendered once and "
+                 f"replayed, so the only difference between rungs is the channel "
+                 f"damage below.</p>")
+
+    if inputs.get("conditions"):
+        P.append("<h3>Channel conditions applied to that audio</h3>")
+        P.append("<div class=scroll><table><thead><tr><th>Rung</th>"
+                 "<th>Impairment</th><th>What it represents</th></tr></thead><tbody>")
+        for rung, cond, why in inputs["conditions"]:
+            P.append(f"<tr><td class=mono>{_esc(rung)}</td>"
+                     f"<td class=cond>{_esc(cond)}</td><td>{_esc(why)}</td></tr>")
+        P.append("</tbody></table></div>")
+    P.append("</div>")
+    return "".join(P)
+
+
 def _matrix_html(by_scenario: Dict[str, Any], ids: List[str]) -> str:
     if not by_scenario:
         return ""
@@ -649,6 +731,10 @@ def html_report(result: Dict[str, Any], measured: Dict[str, Any],
       f"<span>{_esc(manifest.get('created'))}</span>"
       "<span>systems identified by letter only</span></div>")
     A(f"<div class=verdict><p>{_esc(result.get('verdict'))}</p></div>")
+
+    if manifest.get("_inputs"):
+        A("<h2>Inputs</h2>")
+        A(_inputs_html(manifest["_inputs"]))
 
     A("<h2>Scorecard</h2><div class=scroll><table><thead><tr><th>Dimension</th>"
       "<th class=n>Weight</th>"
