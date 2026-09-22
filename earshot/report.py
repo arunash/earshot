@@ -138,11 +138,20 @@ def markdown(result: Dict[str, Any], measured: Dict[str, Any],
         baked = any(v.get("baked") for v in by_scn.values())
         L.append("## Scenario matrix")
         L.append("")
-        L.append("| Scenario | " + ("Condition | " if baked else "")
-                 + " | ".join(ids) + " |")
-        L.append("|---|" + ("---|" if baked else "") + "---|" * len(ids))
+        grouped = any(v.get("group") for v in by_scn.values())
+        if grouped:
+            ordered = []
+            for g in dict.fromkeys(v.get("group", "") for v in by_scn.values()):
+                ordered += [(k, v) for k, v in by_scn.items() if v.get("group") == g]
+            by_scn = dict(ordered)
+        L.append("| Scenario | " + ("From | " if grouped else "")
+                 + ("Condition | " if baked else "") + " | ".join(ids) + " |")
+        L.append("|---|" + ("---|" if grouped else "")
+                 + ("---|" if baked else "") + "---|" * len(ids))
         for sid, sc in by_scn.items():
             row = f"| **{sid}** {sc.get('name', '')} |"
+            if grouped:
+                row += f" {sc.get('group')} |"
             if baked:
                 row += f" `{sc.get('condition')}` |"
             for i in ids:
@@ -653,14 +662,27 @@ def _matrix_html(by_scenario: Dict[str, Any], ids: List[str]) -> str:
     if not by_scenario:
         return ""
     baked = any(v.get("baked") for v in by_scenario.values())
+    grouped = any(v.get("group") for v in by_scenario.values())
+    if grouped:
+        # Keep each source battery's rows together; a 39-row matrix interleaved
+        # by scenario id would hide which question each row is answering.
+        order = []
+        for g in dict.fromkeys(v.get("group", "") for v in by_scenario.values()):
+            order += [(k, v) for k, v in by_scenario.items() if v.get("group") == g]
+        by_scenario = dict(order)
     P = ["<div class=scroll><table class=matrix><thead><tr>",
-         "<th>Scenario</th>", "<th>Condition</th>" if baked else "<th>Tests</th>"]
+         "<th>Scenario</th>"]
+    if grouped:
+        P.append("<th>From</th>")
+    P.append("<th>Condition</th>" if baked else "<th>Tests</th>")
     for i in ids:
         P.append(f"<th class=n>{_esc(i)}</th>")
     P.append("</tr></thead><tbody>")
     for sid, sc in by_scenario.items():
-        P.append(f"<tr><td><b>{_esc(sid)}</b> {_esc(sc.get('name'))}</td>"
-                 f"<td class=cond>{_esc(sc.get('condition') if baked else ', '.join(sc.get('dimensions', [])) or sc.get('condition'))}</td>")
+        P.append(f"<tr><td><b>{_esc(sid)}</b> {_esc(sc.get('name'))}</td>")
+        if grouped:
+            P.append(f"<td class=cond>{_esc(sc.get('group'))}</td>")
+        P.append(f"<td class=cond>{_esc(sc.get('condition') if baked else ', '.join(sc.get('dimensions', [])) or sc.get('condition'))}</td>")
         for i in ids:
             cell = (sc.get("systems") or {}).get(i)
             if not cell:

@@ -766,6 +766,35 @@ def _build_payload(rd: Path, m: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def cmd_combine(a) -> int:
+    """Pool several ingested runs into one analysis for a single report."""
+    from .combine import combine
+    runs = [_run_dir(r.strip()) for r in a.runs]
+    names = {}
+    for spec in (a.label or []):
+        if "=" in spec:
+            k, v = spec.split("=", 1)
+            names[k.strip()] = v.strip()
+    out = _runs_root() / a.name
+    combine(runs, out, label=a.name, group_names=names)
+
+    base = read_json(runs[0] / "manifest.json")
+    write_json(out / "manifest.json", {
+        "run_id": a.name,
+        "created": datetime.now().isoformat(timespec="seconds"),
+        "battery_name": " + ".join(
+            read_json(r / "manifest.json").get("battery", r.name) for r in runs),
+        "profile": a.profile or base.get("profile", "default"),
+        "systems": base["systems"],
+        "combined_from": [r.name for r in runs],
+    })
+    print()
+    print(f"combined into {cyan(str(out))}")
+    print(f"next: {cyan('earshot report ' + a.name)} "
+          f"(after writing {out / 'judge-result.json'})")
+    return 0
+
+
 def cmd_judge(a) -> int:
     rd = _run_dir(a.run)
     m = read_json(rd / "manifest.json")
@@ -967,6 +996,14 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=["auto", "whisper-cpp", "faster-whisper", "none"])
     s.add_argument("--force", action="store_true", help="re-analyze cached calls")
     s.set_defaults(func=cmd_ingest)
+
+    s = sub.add_parser("combine", help="pool several ingested runs into one report")
+    s.add_argument("name", help="id for the combined run")
+    s.add_argument("runs", nargs="+", help="run ids to pool")
+    s.add_argument("--label", action="append",
+                   help="run=Friendly Name, for the report's grouping")
+    s.add_argument("--profile", choices=sorted(rubric.PROFILES))
+    s.set_defaults(func=cmd_combine)
 
     s = sub.add_parser("judge", help="score a run with Claude")
     s.add_argument("run")
