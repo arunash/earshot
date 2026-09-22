@@ -291,8 +291,12 @@ def cmd_bake(a) -> int:
         if bad:
             die(f"published but not serving the current audio: {', '.join(bad)}. "
                 f"Do not start a run against these.")
-        m["audio_urls"] = urls
-        info(f"all {len(urls)} asset(s) verified reachable")
+        # Merge, never replace: `bake --only S10` must not delete the other
+        # sixteen scenarios' URLs and silently break the next full run.
+        m["audio_urls"] = dict(m.get("audio_urls") or {}, **urls)
+        info(f"all {len(urls)} asset(s) verified reachable"
+             + (f" ({len(m['audio_urls'])} total in manifest)"
+                if len(m["audio_urls"]) != len(urls) else ""))
 
     write_json(rd / "manifest.json", m)
     print()
@@ -620,14 +624,18 @@ def _is_crosstalk(text: str, script: List[str], threshold: float = 0.7) -> bool:
     words = lambda t: [w for w in re.findall(r"[a-z0-9']+", (t or "").lower())
                        if not w.isdigit() and w not in WORD_DIGIT]
     a = words(text)
-    if len(a) < 3:
-        return True                       # too short to attribute; discard
     ours = set()
     for line in script:
         ours |= set(words(line))
-    if not ours:
+    if not a or not ours:
         return False
-    return sum(1 for w in a if w in ours) / len(a) >= threshold
+    hits = sum(1 for w in a if w in ours)
+    if len(a) < 3:
+        # A short line is only ours if EVERY word is. Discarding all short lines
+        # threw away legitimate read-backs - "8-4-7-8, hold on." is two words
+        # and is exactly the evidence the digit check exists to find.
+        return hits == len(a)
+    return hits / len(a) >= threshold
 
 
 def _echo_check(rd: Path, sysid: str, scenario: str, expect: str,

@@ -461,7 +461,19 @@ footer{margin-top:4.5rem;padding-top:1.2rem;border-top:2px solid var(--rule);
        color:var(--mut);font-size:.78rem;font-family:"IBM Plex Mono",monospace}
 footer a{color:var(--accent)}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-@media print{body{background:#fff}.card,.scale{break-inside:avoid}}
+@media print{
+  /* Chrome drops backgrounds in print by default, which strips the severity
+     stripes and the latency bars - the parts carrying the information. */
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body{background:#fff}
+  .wrap{max-width:none;padding:0}
+  h2{break-after:avoid}
+  .card,.scale,.script,.inputs,table{break-inside:avoid}
+  tr{break-inside:avoid}
+  details{break-inside:auto}
+  a{text-decoration:none;color:inherit}
+  footer{break-before:avoid}
+}
 """
 
 

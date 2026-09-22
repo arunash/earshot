@@ -43,6 +43,22 @@ VOICES: Dict[str, Dict[str, str]] = {
 RATE_WPM = {"slow": 130, None: 180, "fast": 250}
 GAIN = {"quiet": 0.30, None: 1.0, "loud": 1.0}
 
+# Emotional delivery, via macOS speech-synthesis embedded commands. Measured
+# effect on Samantha: angry lifts f0 from ~182Hz to ~302Hz and shortens the
+# utterance; distressed drops pitch, slows down and quietens.
+#
+# This matters more than it looks. Without it a "furious caller" scenario is
+# angry WORDS in a calm voice, and an agent's de-escalation behaviour is never
+# actually provoked - you measure its reading comprehension, not its manner.
+TONES = {
+    None:         ("", 1.0),
+    "angry":      ("[[pbas 58]][[pmod 6]][[volm 1.0]][[rate 215]]", 1.0),
+    "distressed": ("[[pbas 42]][[pmod 8]][[volm 0.55]][[rate 145]]", 0.62),
+    "flat":       ("[[pbas 45]][[pmod 0]][[volm 0.8]][[rate 175]]", 0.85),
+    "rushed":     ("[[pbas 52]][[pmod 4]][[volm 0.95]][[rate 240]]", 1.0),
+    "hesitant":   ("[[pbas 46]][[pmod 5]][[volm 0.7]][[rate 140]]", 0.8),
+}
+
 
 def engine() -> Optional[str]:
     if have("say"):
@@ -53,8 +69,9 @@ def engine() -> Optional[str]:
 
 
 def render(text: str, sr: int, voice: str = "default",
-           rate: Optional[str] = None, volume: Optional[str] = None) -> np.ndarray:
-    """Render one line to mono float32 at `sr`."""
+           rate: Optional[str] = None, volume: Optional[str] = None,
+           tone: Optional[str] = None) -> np.ndarray:
+    """Render one line to mono float32 at `sr`, optionally in a given tone."""
     eng = engine()
     if eng is None:
         die("No local TTS found. macOS has `say` built in; on Linux install "
@@ -62,12 +79,18 @@ def render(text: str, sr: int, voice: str = "default",
 
     v = VOICES.get(voice, {}).get(eng, voice)
     wpm = RATE_WPM.get(rate, RATE_WPM[None])
+    if tone and tone not in TONES:
+        die(f"unknown tone {tone!r}; choose from "
+            f"{', '.join(t for t in TONES if t)}")
+    prefix, tone_gain = TONES.get(tone, TONES[None])
+    if eng != "say":
+        prefix = ""      # embedded commands are a macOS speech-synthesis feature
 
     with tempfile.TemporaryDirectory() as td:
         raw = Path(td) / ("out.aiff" if eng == "say" else "out.wav")
         if eng == "say":
-            subprocess.run(["say", "-v", v, "-r", str(wpm), "-o", str(raw), text],
-                           check=True, capture_output=True)
+            subprocess.run(["say", "-v", v, "-r", str(wpm), "-o", str(raw),
+                            prefix + text], check=True, capture_output=True)
         else:
             binary = "espeak-ng" if have("espeak-ng") else "espeak"
             subprocess.run([binary, "-v", v, "-s", str(wpm), "-w", str(raw), text],
@@ -81,7 +104,10 @@ def render(text: str, sr: int, voice: str = "default",
 
     x = data.reshape(-1).astype(np.float32)
     peak = float(np.max(np.abs(x))) or 1.0
-    x = x / peak * 0.72 * GAIN.get(volume, 1.0)   # headroom for the noise bed
+    # Peak-normalize for a consistent reference, then apply the deliberate level
+    # differences. Without the tone gain a "quiet, distressed" caller would be
+    # normalized back up to the same loudness as a shouting one.
+    x = x / peak * 0.72 * GAIN.get(volume, 1.0) * tone_gain
     return x
 
 

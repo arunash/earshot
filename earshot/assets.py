@@ -123,7 +123,21 @@ def publish(files: List[Path], environment: str = "earshot",
         if verbose:
             info(f"[{i}/{len(files)}] uploaded {remote}")
 
-    build = service.builds.create(asset_versions=versions)
+    # A Twilio build is the complete set of live assets, not a delta. Building
+    # from only the versions just uploaded silently un-deploys everything else -
+    # a `bake --only S10` would take the other seventeen scenarios offline while
+    # reporting success, and the next full run would fail on every one of them.
+    keep = []
+    for a in service.assets.list(limit=100):
+        if a.friendly_name in names.values():
+            continue                       # replaced by this publish
+        vs = service.assets(a.sid).asset_versions.list(limit=1)
+        if vs:
+            keep.append(vs[0].sid)
+    if keep and verbose:
+        info(f"carrying {len(keep)} existing asset(s) into the build")
+
+    build = service.builds.create(asset_versions=versions + keep)
     if verbose:
         info("building...")
     for _ in range(90):

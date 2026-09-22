@@ -57,7 +57,8 @@ def render_scenario(scenario: Scenario, agent_budget_s: float = 6.0,
                 _, d = read_wav(p)
             audio = d.reshape(-1).astype(np.float32)
         elif turn.say:
-            audio = tts.render(turn.say, sr, turn.voice, turn.rate, turn.volume)
+            audio = tts.render(turn.say, sr, turn.voice, turn.rate, turn.volume,
+                               turn.tone)
         else:
             continue
         clips.append((t, audio, turn))
@@ -75,6 +76,8 @@ def render_scenario(scenario: Scenario, agent_budget_s: float = 6.0,
             "text": turn.say or f"<audio {turn.play}>",
             "wait": turn.wait,
             "barge_in": turn.is_barge_in,
+            "voice": turn.voice,
+            "tone": turn.tone,
         })
     return out, timeline
 

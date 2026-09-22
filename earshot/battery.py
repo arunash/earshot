@@ -35,6 +35,7 @@ class Turn:
     voice: str = "default"
     rate: Optional[str] = None      # fast | slow
     volume: Optional[str] = None    # quiet | loud
+    tone: Optional[str] = None      # angry | distressed | flat | rushed | hesitant
 
     @property
     def is_barge_in(self) -> bool:
@@ -155,6 +156,7 @@ def _turn(d: Any, default_gap: int) -> Turn:
         voice=d.get("voice", "default"),
         rate=d.get("rate"),
         volume=d.get("volume"),
+        tone=d.get("tone"),
     )
     if t.wait not in ("after_agent", "during_agent", "fixed"):
         die(f"bad turn.wait {t.wait!r} (after_agent | during_agent | fixed)")
