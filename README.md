@@ -155,6 +155,16 @@ gracefully: without whisper you can paste your own transcripts, and without an
 API key `earshot judge --dry-run` writes the assembled prompt for you to paste
 into any Claude session.
 
+### As a Claude Code skill
+
+```bash
+cp -r skills/voice-agent-benchmark ~/.claude/skills/
+```
+
+Then ask Claude to benchmark or re-test a voice agent. The skill covers fresh
+runs, line-health checks before and during a run, before/after retests against
+a frozen baseline, and the two-page comparison PDF.
+
 ## Use it
 
 ### 1. Start a blind run
